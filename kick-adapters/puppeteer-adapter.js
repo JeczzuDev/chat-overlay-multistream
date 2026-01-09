@@ -32,6 +32,9 @@ class KickPuppeteerAdapter {
 
             this.page = await this.browser.newPage();
             
+            // Configurar User-Agent para evitar detección de bot
+            await this.page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            
             // Obtener CDP session para interceptar WebSocket
             this.cdpSession = await this.page.createCDPSession();
             await this.cdpSession.send('Network.enable');
