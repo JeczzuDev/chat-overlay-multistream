@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Overlay - Multistream</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: transparent;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    #chat-container {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      right: 20px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      overflow: hidden;
+    }
+
+    #messages {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow: hidden;
+    }
+
+    .message {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+      padding: 10px 14px;
+      background: rgba(0, 0, 0, 0.75);
+      border-radius: 8px;
+      animation: slideIn 0.3s ease-out;
+      border-left: 4px solid var(--platform-color, #fff);
+    }
+
+    .message.twitch {
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      --platform-color: #9146FF;
+    }
+
+    .message.kick {
+      --platform-color: #53FC18;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(-20px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes fadeOut {
+      from {
+        opacity: 1;
+      }
+
+      to {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+    }
+
+    .message.removing {
+      animation: fadeOut 0.3s ease-out forwards;
+    }
+
+    .platform-icon {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .platform-icon img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .message-content {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+    }
+
+    .username {
+      font-weight: 700;
+      font-size: 14px;
+      margin-right: 8px;
+    }
+
+    .badges {
+      display: inline-flex;
+      gap: 4px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .badge {
+      font-size: 10px;
+      padding: 2px 5px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.2);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .badge.subscriber {
+      background: #9146FF;
+      color: white;
+    }
+
+    .badge.moderator {
+      background: #ffffff; /* fallback sólido */
+      background: rgba(255, 255, 255, 0.3);
+      color: #000;
+    }
+
+    .badge.vip {
+      background: #ffffff; /* fallback sólido */
+      background: rgba(255, 255, 255, 0.3);
+      color: #000;
+    }
+
+    .text {
+      font-size: 15px;
+      color: #fff;
+      word-wrap: break-word;
+      line-height: 1.4;
+      display: inline;
+    }
+
+    .message-text {
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 2px;
+      font-size: 15px;
+      color: #fff;
+      line-height: 1.4;
+    }
+
+    .emote {
+      display: inline-block;
+      height: 28px;
+      max-height: 28px;
+      vertical-align: middle;
+      margin: 0 2px;
+    }
+
+    .text-part {
+      display: inline;
+      color: #fff;
+    }
+
+    /* Estado de conexión */
+    #connection-status {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+    }
+
+    #connection-status.connected {
+      background: rgba(0, 200, 83, 0.9);
+      color: #fff;
+    }
+
+    #connection-status.disconnected {
+      background: rgba(244, 67, 54, 0.9);
+      color: #fff;
+    }
+
+    #connection-status.connecting {
+      background: rgba(255, 152, 0, 0.9);
+      color: #fff;
+    }
+
+    /* Ocultar en OBS después de un tiempo */
+    #connection-status.hide-in-obs {
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="connection-status" class="connecting">Conectando...</div>
+
+  <div id="chat-container">
+    <div id="messages"></div>
+  </div>
+
+  <script>
+    // ============================================
+    // CONFIGURACIÓN
+    // ============================================
+    const WS_URL = `ws://${globalThis.location.host}`;
+
+    // Persistir mensajes (mantener historial completo)
+    const PERSIST_MESSAGES = true; // true = mantener historial, false = auto-eliminar
+
+    // Configuración según modo
+    const MAX_MESSAGES_PERSIST = 100;
+    const MAX_MESSAGES_TRANSIENT = 15;
+    const MAX_MESSAGES = PERSIST_MESSAGES ? MAX_MESSAGES_PERSIST : MAX_MESSAGES_TRANSIENT;
+    const MESSAGE_LIFETIME_MS = 60000; // 60 segundos (solo aplica si PERSIST_MESSAGES = false)
+    const HIDE_STATUS_AFTER_MS = 5000; // Ocultar status después de 5s
+    const RECONNECT_MAX_ATTEMPTS = 10;
+    const RECONNECT_BASE_DELAY_MS = 1000;
+    const RECONNECT_MAX_DELAY_MS = 30000;
+
+    // Iconos de plataformas
+    const PLATFORM_ICONS = {
+      twitch: '/icons/twitch.png',
+      kick: '/icons/kick.png'
+    };
+
+    // ============================================
+    // ELEMENTOS DOM
+    // ============================================
+    const messagesContainer = document.getElementById('messages');
+    const connectionStatus = document.getElementById('connection-status');
+
+    // ============================================
+    // WEBSOCKET
+    // ============================================
+    let ws = null;
+    let reconnectAttempts = 0;
+
+    function connect() {
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        console.log('✅ Conectado al servidor');
+        updateStatus('connected', 'Conectado');
+        reconnectAttempts = 0;
+
+        // Ocultar status después de un tiempo
+        setTimeout(() => {
+          connectionStatus.classList.add('hide-in-obs');
+        }, HIDE_STATUS_AFTER_MS);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          addMessage(message);
+        } catch (e) {
+          console.error('Error parsing message:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('❌ Desconectado del servidor');
+        updateStatus('disconnected', 'Desconectado');
+        connectionStatus.classList.remove('hide-in-obs');
+
+        // Intentar reconectar
+        if (reconnectAttempts < RECONNECT_MAX_ATTEMPTS) {
+          reconnectAttempts++;
+          const delay = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts), RECONNECT_MAX_DELAY_MS);
+          console.log(`Reconectando en ${delay / 1000}s... (intento ${reconnectAttempts})`);
+          updateStatus('connecting', `Reconectando (${reconnectAttempts})...`);
+          setTimeout(connect, delay);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+    }
+
+    function updateStatus(state, text) {
+      connectionStatus.className = state;
+      connectionStatus.textContent = text;
+    }
+
+    // ============================================
+    // MENSAJES
+    // ============================================
+    function addMessage(msg) {
+      const messageEl = document.createElement('div');
+      messageEl.className = `message ${msg.platform}`;
+      messageEl.dataset.id = msg.id;
+
+      // Badges HTML
+      let badgesHtml = '';
+      if (msg.isModerator) badgesHtml += '<span class="badge moderator">MOD</span>';
+      if (msg.isVIP) badgesHtml += '<span class="badge vip">VIP</span>';
+      if (msg.isSubscriber) badgesHtml += '<span class="badge subscriber">SUB</span>';
+
+      // Renderizar parts (texto + emotes)
+      const messageContentHtml = renderMessageParts(msg.parts || [{ type: 'text', text: msg.raw || msg.message || '' }]);
+
+      const platformIcon = PLATFORM_ICONS[msg.platform] || '';
+
+      messageEl.innerHTML = `
+                <div class="platform-icon ${msg.platform}">
+                    <img src="${platformIcon}" alt="${msg.platform}" />
+                </div>
+                <div class="message-content">
+                    <span class="badges">${badgesHtml}</span>
+                    <span class="username" style="color: ${msg.color}">${escapeHtml(msg.username)}</span>
+                    <span class="message-text">${messageContentHtml}</span>
+                </div>
+            `;
+
+      messagesContainer.appendChild(messageEl);
+
+      // Scroll automático
+      messageEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+      // Eliminar mensajes antiguos si hay demasiados
+      while (messagesContainer.children.length > MAX_MESSAGES) {
+        const oldMessage = messagesContainer.firstElementChild;
+        removeMessage(oldMessage);
+      }
+
+      // Auto-eliminar después de cierto tiempo (solo si PERSIST_MESSAGES = false)
+      if (!PERSIST_MESSAGES) {
+        setTimeout(() => {
+          const el = document.querySelector(`[data-id="${msg.id}"]`);
+          if (el) removeMessage(el);
+        }, MESSAGE_LIFETIME_MS);
+      }
+    }
+
+    function renderMessageParts(parts) {
+      return parts.map(part => {
+        if (part.type === 'emote') {
+          return `<img class="emote" src="${part.url}" alt="${escapeHtml(part.name)}" title="${escapeHtml(part.name)}" loading="lazy" />`;
+        } else {
+          return `<span class="text-part">${escapeHtml(part.text)}</span>`;
+        }
+      }).join('');
+    }
+
+    function removeMessage(element) {
+      element.classList.add('removing');
+      setTimeout(() => {
+        if (element.parentNode) {
+          element.remove();
+        }
+      }, 300);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ============================================
+    // INICIAR
+    // ============================================
+    connect();
+  </script>
+</body>
+
+</html>
