@@ -41,10 +41,10 @@
 
     .message {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: flex-start;
       gap: 10px;
-      padding: 10px 14px;
+      padding: 14px;
       background: rgba(0, 0, 0, 0.75);
       border-radius: 8px;
       animation: slideIn 0.3s ease-out;
@@ -53,8 +53,6 @@
 
     .message.twitch {
       display: flex;
-      justify-content: flex-start;
-      align-items: center;
       --platform-color: #9146FF;
     }
 
@@ -94,8 +92,8 @@
       height: 20px;
       flex-shrink: 0;
       display: flex;
-      align-items: center;
-      justify-content: center;
+      align-items: flex-start;
+      justify-content: flex-start;
     }
 
     .platform-icon img {
@@ -110,6 +108,7 @@
       display: flex;
       justify-content: flex-start;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     .username {
@@ -161,7 +160,7 @@
 
     .message-text {
       display: inline-flex;
-      align-items: center;
+      align-items: flex-start;
       flex-wrap: wrap;
       gap: 2px;
       font-size: 15px;
@@ -231,7 +230,7 @@
     const WS_URL = `ws://${globalThis.location.host}`;
 
     // Persistir mensajes (mantener historial completo)
-    const PERSIST_MESSAGES = false; // true = mantener historial, false = auto-eliminar
+    const PERSIST_MESSAGES = true; // true = mantener historial, false = auto-eliminar
 
     // Configuración según modo
     const MAX_MESSAGES_PERSIST = 100;
