@@ -44,7 +44,29 @@ npm install
    KICK_USE_MOCK=false
    ```
 
-### 4. Iniciar el servidor
+### 4. (Opcional) Configurar badges de Twitch
+
+Para mostrar las badges oficiales de Twitch (broadcaster, mod, sub, etc.), necesitas credenciales de la API:
+
+1. Ve a [Twitch Developer Console](https://dev.twitch.tv/console/apps)
+2. Inicia sesión con tu cuenta de Twitch
+3. Haz clic en "Register Your Application"
+4. Completa el formulario:
+   - **Nombre:** Chat Overlay (o el que prefieras)
+   - **OAuth Redirect URLs:** `http://localhost:3000`
+   - **Category:** Chat Bot
+5. Haz clic en "Create"
+6. En tu aplicación, copia el **Client ID**
+7. Haz clic en "New Secret" para generar el **Client Secret**
+8. Agrega ambos valores a tu archivo `.env`:
+   ```env
+   TWITCH_CLIENT_ID=tu_client_id
+   TWITCH_CLIENT_SECRET=tu_client_secret
+   ```
+
+> **Nota:** Sin estas credenciales, el overlay funcionará pero mostrará badges de texto (MOD, SUB, VIP) en lugar de las imágenes oficiales.
+
+### 5. Iniciar el servidor
 
 **Opción 1: Manual (npm)**
 
