@@ -103,14 +103,22 @@ class KickPuppeteerAdapter {
                 const sender = eventData.sender || {};
                 const identity = sender.identity || {};
                 
-                const badges = [];
-                const isModerator = identity.badges?.some(b => b.type === 'moderator') || false;
-                const isSubscriber = identity.badges?.some(b => b.type === 'subscriber') || false;
-                const isVIP = identity.badges?.some(b => b.type === 'vip') || false;
+                // Extraer badges completos con tipo, texto y count
+                const rawBadges = identity.badges || [];
                 
-                if (identity.badges) {
-                    badges.push(...identity.badges.map(b => b.type));
-                }
+                const badges = rawBadges.map(b => ({
+                    type: b.type,
+                    text: b.text || b.type,
+                    count: b.count || 0
+                }));
+                
+                const isModerator = rawBadges.some(b => b.type === 'moderator');
+                const isSubscriber = rawBadges.some(b => b.type === 'subscriber');
+                const isVIP = rawBadges.some(b => b.type === 'vip');
+                const isBroadcaster = rawBadges.some(b => b.type === 'broadcaster');
+                const isOG = rawBadges.some(b => b.type === 'og');
+                const isFounder = rawBadges.some(b => b.type === 'founder');
+                const isVerified = rawBadges.some(b => b.type === 'verified');
                 
                 // Extraer emotes de Kick
                 const emotes = [];
@@ -131,6 +139,10 @@ class KickPuppeteerAdapter {
                     isModerator,
                     isSubscriber,
                     isVIP,
+                    isBroadcaster,
+                    isOG,
+                    isFounder,
+                    isVerified,
                     color: identity.color || null,
                     timestamp: Date.now()
                 };
