@@ -12,6 +12,10 @@
       box-sizing: border-box;
     }
 
+    :root {
+      color-scheme: dark;
+    }
+
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       background: transparent;
@@ -22,7 +26,8 @@
 
     #chat-container {
       position: fixed;
-      bottom: 20px;
+      top: 55px;
+      bottom: 0px;
       left: 20px;
       right: 20px;
       max-height: 80vh;
@@ -45,8 +50,8 @@
       justify-content: flex-start;
       gap: 10px;
       padding: 14px;
-      background: rgba(0, 0, 0, 0.75);
-      border-radius: 8px;
+      background: rgba(0, 0, 0, 1);
+      border-radius: .25rem;
       animation: slideIn 0.3s ease-out;
       border-left: 4px solid var(--platform-color, #fff);
     }
@@ -109,6 +114,7 @@
       justify-content: flex-start;
       align-items: center;
       flex-wrap: wrap;
+      gap: .5rem;
     }
 
     .username {
@@ -122,6 +128,7 @@
       gap: 4px;
       margin-right: 6px;
       vertical-align: middle;
+      align-items: center;
     }
 
     .badge {
@@ -131,6 +138,12 @@
       background: rgba(255, 255, 255, 0.2);
       text-transform: uppercase;
       font-weight: 600;
+    }
+
+    .badge-image {
+      height: 18px;
+      width: auto;
+      vertical-align: middle;
     }
 
     .badge.subscriber {
@@ -254,6 +267,11 @@
     const messagesContainer = document.getElementById('messages');
     const connectionStatus = document.getElementById('connection-status');
 
+    // Control de rate limiting para mensajes
+    let messageQueue = [];
+    let isProcessingQueue = false;
+    const MESSAGE_PROCESS_INTERVAL = 50; // ms entre mensajes (evita saturación)
+
     // ============================================
     // WEBSOCKET
     // ============================================
@@ -277,7 +295,9 @@
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          addMessage(message);
+          // Agregar a cola en lugar de procesar inmediatamente
+          messageQueue.push(message);
+          processMessageQueue();
         } catch (e) {
           console.error('Error parsing message:', e);
         }
@@ -309,6 +329,34 @@
     }
 
     // ============================================
+    // COLA DE MENSAJES (rate limiting)
+    // ============================================
+    function processMessageQueue() {
+      if (isProcessingQueue || messageQueue.length === 0) return;
+      
+      isProcessingQueue = true;
+      
+      function processNext() {
+        if (messageQueue.length === 0) {
+          isProcessingQueue = false;
+          return;
+        }
+        
+        const message = messageQueue.shift();
+        addMessage(message);
+        
+        // Procesar siguiente mensaje después de un breve delay
+        if (messageQueue.length > 0) {
+          setTimeout(processNext, MESSAGE_PROCESS_INTERVAL);
+        } else {
+          isProcessingQueue = false;
+        }
+      }
+      
+      processNext();
+    }
+
+    // ============================================
     // MENSAJES
     // ============================================
     function addMessage(msg) {
@@ -316,23 +364,38 @@
       messageEl.className = `message ${msg.platform}`;
       messageEl.dataset.id = msg.id;
 
-      // Badges HTML
+      // Renderizar badges: imágenes para ambas plataformas
       let badgesHtml = '';
-      if (msg.isModerator) badgesHtml += '<span class="badge moderator">MOD</span>';
-      if (msg.isVIP) badgesHtml += '<span class="badge vip">VIP</span>';
-      if (msg.isSubscriber) badgesHtml += '<span class="badge subscriber">SUB</span>';
+      let hasBadges = false;
+      
+      if (msg.badgeImages && msg.badgeImages.length > 0) {
+        // Usar badgeImages (Twitch y Kick con SVGs)
+        badgesHtml = msg.badgeImages.map(badge => 
+          `<img class="badge-image" src="${badge.url}" alt="${escapeHtml(badge.type)}" title="${escapeHtml(badge.text || badge.type)}" />`
+        ).join('');
+        hasBadges = true;
+      } else if (msg.isModerator || msg.isVIP || msg.isSubscriber) {
+        // Fallback: badges de texto solo si hay alguna
+        if (msg.isModerator) badgesHtml += '<span class="badge moderator">MOD</span>';
+        if (msg.isVIP) badgesHtml += '<span class="badge vip">VIP</span>';
+        if (msg.isSubscriber) badgesHtml += '<span class="badge subscriber">SUB</span>';
+        hasBadges = true;
+      }
 
       // Renderizar parts (texto + emotes)
       const messageContentHtml = renderMessageParts(msg.parts || [{ type: 'text', text: msg.raw || msg.message || '' }]);
 
       const platformIcon = PLATFORM_ICONS[msg.platform] || '';
+      
+      // Solo mostrar span de badges si hay badges
+      const badgesSpan = hasBadges ? `<span class="badges">${badgesHtml}</span>` : '';
 
       messageEl.innerHTML = `
                 <div class="platform-icon ${msg.platform}">
                     <img src="${platformIcon}" alt="${msg.platform}" />
                 </div>
                 <div class="message-content">
-                    <span class="badges">${badgesHtml}</span>
+                    ${badgesSpan}
                     <span class="username" style="color: ${msg.color}">${escapeHtml(msg.username)}</span>
                     <span class="message-text">${messageContentHtml}</span>
                 </div>
@@ -340,19 +403,20 @@
 
       messagesContainer.appendChild(messageEl);
 
-      // Scroll automático
-      messageEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      // Scroll automático (sin animación para mejor rendimiento)
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
       // Eliminar mensajes antiguos si hay demasiados
       while (messagesContainer.children.length > MAX_MESSAGES) {
         const oldMessage = messagesContainer.firstElementChild;
-        removeMessage(oldMessage);
+        if (oldMessage) oldMessage.remove(); // Eliminación directa sin animación
       }
 
       // Auto-eliminar después de cierto tiempo (solo si PERSIST_MESSAGES = false)
       if (!PERSIST_MESSAGES) {
+        const msgId = msg.id;
         setTimeout(() => {
-          const el = document.querySelector(`[data-id="${msg.id}"]`);
+          const el = document.querySelector(`[data-id="${msgId}"]`);
           if (el) removeMessage(el);
         }, MESSAGE_LIFETIME_MS);
       }
