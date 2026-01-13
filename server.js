@@ -14,6 +14,11 @@ const KICK_CHANNEL = process.env.KICK_CHANNEL || 'jeczzu';
 const KICK_ENABLED = process.env.KICK_ENABLED !== 'false';
 const KICK_USE_MOCK = process.env.KICK_USE_MOCK === 'true';
 
+// YouTube
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || '';
+const YOUTUBE_VIDEO_ID = process.env.YOUTUBE_VIDEO_ID || '';
+const YOUTUBE_ENABLED = process.env.YOUTUBE_ENABLED === 'true';
+
 // Constantes de historial y mensajes
 const MAX_HISTORY = 100;
 const MOCK_MESSAGE_MIN_DELAY = 5000; // 5 segundos
@@ -27,7 +32,8 @@ const KICK_EMOTE_URL_TEMPLATE = 'https://files.kick.com/emotes/{id}/fullsize';
 // Colores de plataformas
 const PLATFORM_COLORS = {
     twitch: '#9146FF',
-    kick: '#53FC18'
+    kick: '#53FC18',
+    youtube: '#FF0000'
 };
 
 // Colores aleatorios para usuarios
@@ -50,6 +56,31 @@ const KICK_BADGE_SVGS = {
     verified: `data:image/svg+xml,${encodeURIComponent('<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" class="shrink-0"><g clip-path="url(#clip0_614_6275)"><path d="M30.8598 19.2368C30.1977 18.2069 29.5356 17.2138 28.8736 16.1839C28.7264 15.9632 28.7264 15.8161 28.8736 15.5954C29.5356 14.6023 30.1609 13.6092 30.823 12.6161C31.5954 11.4391 31.1908 10.2989 29.8667 9.82069C28.7632 9.41609 27.6598 8.97471 26.5563 8.57012C26.3356 8.49656 26.2253 8.34943 26.2253 8.09196C26.1885 6.87816 26.1149 5.66437 26.0414 4.48736C25.9678 3.2 24.9747 2.46437 23.7241 2.7954C22.5471 3.08966 21.3701 3.42069 20.2299 3.75173C19.9724 3.82529 19.8253 3.75173 19.6414 3.56782C18.9057 2.61149 18.1333 1.69195 17.3977 0.772414C16.5885 -0.257472 15.3379 -0.257472 14.492 0.772414C13.7563 1.69195 12.9839 2.61149 12.2851 3.53103C12.1012 3.7885 11.9172 3.82529 11.623 3.75173C10.4828 3.42069 9.34253 3.12644 8.53334 2.90575C6.95173 2.53793 5.99541 3.16322 5.92184 4.48736C5.84828 5.70115 5.77472 6.91495 5.73794 8.16552C5.73794 8.42299 5.62759 8.53333 5.4069 8.64368C4.26667 9.08506 3.12644 9.52644 1.98621 9.96782C0.809203 10.446 0.441387 11.5862 1.14023 12.6529C1.8023 13.6828 2.46437 14.6759 3.12644 15.7057C3.27356 15.9264 3.27356 16.0736 3.12644 16.331C2.42759 17.3609 1.76552 18.3908 1.10345 19.4575C0.478165 20.4506 0.882759 21.6276 1.98621 22.069C3.12644 22.5104 4.30345 22.9517 5.44368 23.3931C5.70115 23.4667 5.77471 23.6138 5.77471 23.8713C5.81149 25.0483 5.95862 26.1885 5.95862 27.3655C5.95862 28.5425 6.9885 29.6092 8.42298 29.1678C9.56321 28.8 10.7034 28.5425 11.8437 28.2115C12.0644 28.1379 12.2115 28.1747 12.3586 28.3954C13.131 29.3517 13.8667 30.2713 14.6391 31.2276C15.485 32.2575 16.6988 32.2575 17.508 31.2276C18.2805 30.2713 19.0161 29.3517 19.7885 28.3954C19.9356 28.2115 20.046 28.1379 20.3034 28.2115C21.4804 28.5425 22.6575 28.8368 23.8345 29.1678C25.0483 29.4988 26.0781 28.7632 26.1149 27.5126C26.1885 26.2989 26.2621 25.0851 26.2988 23.8345C26.2988 23.5402 26.446 23.4299 26.6667 23.3563C27.7701 22.9517 28.9103 22.5104 30.0138 22.069C31.1908 21.4805 31.5586 20.3034 30.8598 19.2368ZM22.069 13.2046L14.7127 20.5609C14.5287 20.7448 14.2713 20.892 14.0138 20.9287C13.9402 20.9287 13.8299 20.9655 13.7563 20.9655C13.4253 20.9655 13.0575 20.8184 12.8 20.5609L9.78392 17.5448C9.26898 17.0299 9.26898 16.1839 9.78392 15.669C10.2989 15.154 11.1448 15.154 11.6598 15.669L13.7196 17.7287L20.1196 11.3287C20.6345 10.8138 21.4805 10.8138 21.9954 11.3287C22.5839 11.8437 22.5839 12.6897 22.069 13.2046Z" fill="url(#paint0_linear_614_6275)"></path></g><defs><linearGradient id="paint0_linear_614_6275" x1="8.14138" y1="32.3591" x2="24.4968" y2="0.904884" gradientUnits="userSpaceOnUse"><stop stop-color="#1EFF00"></stop><stop offset="0.99" stop-color="#00FF8C"></stop></linearGradient><clipPath id="clip0_614_6275"><rect width="32" height="32" fill="white"></rect></clipPath></defs></svg>')}`,
     sub_gifter: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><rect width="18" height="18" rx="3" fill="%23FF69B4"/><path d="M9 5L4 10H7V14H11V10H14L9 5Z" fill="%23fff"/></svg>')}`
 };
+
+// ============================================
+// SISTEMA DE BADGES DE YOUTUBE (SVG Data URIs)
+// ============================================
+const YOUTUBE_BADGE_SVGS = {
+    owner: `data:image/svg+xml,${encodeURIComponent('<svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="4" fill="#FF0000"/><path d="M16 7L8 12V20L16 25L24 20V12L16 7Z" fill="white"/><path d="M14 13V19L19 16L14 13Z" fill="#FF0000"/></svg>')}`,
+    moderator: `data:image/svg+xml,${encodeURIComponent('<svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="4" fill="#5E84F1"/><path d="M16 6L7 11V16C7 21.55 10.84 26.74 16 28C21.16 26.74 25 21.55 25 16V11L16 6ZM14 21L10 17L11.41 15.59L14 18.17L20.59 11.58L22 13L14 21Z" fill="white"/></svg>')}`,
+    member: `data:image/svg+xml,${encodeURIComponent('<svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="4" fill="#2BA640"/><path d="M16 6C10.48 6 6 10.48 6 16C6 21.52 10.48 26 16 26C21.52 26 26 21.52 26 16C26 10.48 21.52 6 16 6ZM13 20L9 16L10.41 14.59L13 17.17L21.59 8.58L23 10L13 20Z" fill="white"/></svg>')}`,
+    verified: `data:image/svg+xml,${encodeURIComponent('<svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 2L19.09 5.41L23.66 4.93L24.64 9.41L28.86 11.12L27.36 15.5L29.78 19.36L26.09 22.09L25.61 26.66L21.13 25.68L17.27 28.1L14.54 24.41L10.17 25.89L8.46 21.67L4.22 19.96L5.7 15.59L3.28 11.73L6.97 9L7.45 4.43L11.93 5.41L15.79 2.99L16 2Z" fill="#606060"/><path d="M14 19L10 15L11.41 13.59L14 16.17L20.59 9.58L22 11L14 19Z" fill="white"/></svg>')}`
+};
+
+/**
+ * Generar badgeImages para YouTube basado en los badges del mensaje
+ */
+function getYouTubeBadgeImages(badges) {
+    if (!badges || badges.length === 0) return [];
+    
+    return badges
+        .filter(badge => YOUTUBE_BADGE_SVGS[badge.type])
+        .map(badge => ({
+            type: badge.type,
+            text: badge.text || badge.type,
+            url: YOUTUBE_BADGE_SVGS[badge.type]
+        }));
+}
 
 /**
  * Generar badgeImages para Kick basado en los badges del mensaje
@@ -443,6 +474,37 @@ twitchClient.on('disconnected', (reason) => {
 });
 
 // ============================================
+// CLIENTE YOUTUBE (Adapter)
+// ============================================
+let youtubeClient = null;
+
+if (YOUTUBE_ENABLED && YOUTUBE_API_KEY && YOUTUBE_VIDEO_ID) {
+    console.log('🔴 Usando YouTube Adapter');
+    const YouTubeAdapter = require('./youtube-adapter');
+    
+    youtubeClient = new YouTubeAdapter(YOUTUBE_VIDEO_ID, YOUTUBE_API_KEY, (messageData) => {
+        // Generar imágenes de badges para YouTube
+        const youtubeBadgeImages = getYouTubeBadgeImages(messageData.badges);
+        
+        const unifiedMessage = createUnifiedMessage('youtube', messageData.username, messageData.message, {
+            color: PLATFORM_COLORS.youtube,
+            badges: messageData.badges,
+            badgeImages: youtubeBadgeImages,
+            isSubscriber: messageData.isMember,
+            isModerator: messageData.isModerator,
+            isVIP: messageData.isChatOwner
+        });
+        
+        console.log(`🔴 [YOUTUBE] ${unifiedMessage.username}: ${messageData.message}`);
+        broadcast(unifiedMessage);
+    });
+} else if (YOUTUBE_ENABLED) {
+    console.log('🔴 YouTube habilitado pero falta YOUTUBE_API_KEY o YOUTUBE_VIDEO_ID');
+} else {
+    console.log('🔴 YouTube deshabilitado');
+}
+
+// ============================================
 // CLIENTE KICK (Adapter System)
 // ============================================
 let kickClient = null;
@@ -561,6 +623,11 @@ server.listen(PORT, async () => {
     console.log(`📡 Servidor corriendo en: http://localhost:${PORT}`);
     console.log(`🖼️  Overlay URL: http://localhost:${PORT}/overlay.html`);
     console.log('═══════════════════════════════════════════');
+    console.log('📺 Plataformas:');
+    console.log(`   💜 Twitch: #${TWITCH_CHANNEL}`);
+    console.log(`   💚 Kick: ${KICK_ENABLED ? '#' + KICK_CHANNEL : 'Deshabilitado'}`);
+    console.log(`   🔴 YouTube: ${YOUTUBE_ENABLED ? YOUTUBE_VIDEO_ID : 'Deshabilitado'}`);
+    console.log('═══════════════════════════════════════════');
     
     // Obtener token de Twitch y cargar badges globales
     await getTwitchAppToken();
@@ -568,6 +635,15 @@ server.listen(PORT, async () => {
     
     // Conectar a Twitch
     twitchClient.connect().catch(console.error);
+    
+    // Iniciar YouTube (si está habilitado)
+    if (youtubeClient) {
+        try {
+            await youtubeClient.start();
+        } catch (error) {
+            console.error('🔴 Error al iniciar YouTube:', error.message);
+        }
+    }
     
     // Iniciar Kick (si está habilitado)
     if (kickClient) {
@@ -584,6 +660,10 @@ server.listen(PORT, async () => {
 // ============================================
 process.on('SIGINT', async () => {
     console.log('\n🛑 Cerrando servidor...');
+    
+    if (youtubeClient) {
+        await youtubeClient.stop();
+    }
     
     if (kickClient) {
         await kickClient.stop();
