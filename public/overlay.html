@@ -41,7 +41,69 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      overflow: hidden;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none; /* IE/Edge */
+    }
+
+    #messages::-webkit-scrollbar {
+      display: none; /* Chrome/Safari/Opera */
+    }
+
+    /* Botón de "ponerse al día" */
+    #scroll-to-bottom {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      z-index: 100;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    }
+
+    #scroll-to-bottom:hover {
+      background: rgba(50, 50, 50, 0.95);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+
+    #scroll-to-bottom.visible {
+      display: flex;
+    }
+
+    #scroll-to-bottom .arrow {
+      font-size: 10px;
+    }
+
+    /* Indicador de pausa */
+    #pause-indicator {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 152, 0, 0.9);
+      color: #000;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      display: none;
+      z-index: 100;
+    }
+
+    #pause-indicator.visible {
+      display: block;
     }
 
     .message {
@@ -63,6 +125,10 @@
 
     .message.kick {
       --platform-color: #53FC18;
+    }
+
+    .message.youtube {
+      --platform-color: #FF0000;
     }
 
     @keyframes slideIn {
@@ -233,7 +299,12 @@
   <div id="connection-status" class="connecting">Conectando...</div>
 
   <div id="chat-container">
+    <div id="pause-indicator">⏸ Chat pausado</div>
     <div id="messages"></div>
+    <button id="scroll-to-bottom">
+      <span class="arrow">▼</span>
+      <span>Ver mensajes nuevos</span>
+    </button>
   </div>
 
   <script>
@@ -242,8 +313,12 @@
     // ============================================
     const WS_URL = `ws://${globalThis.location.host}`;
 
+    // Detectar parámetro de URL para scroll pausable
+    const urlParams = new URLSearchParams(globalThis.location.search);
+    const PAUSABLE_SCROLL_ENABLED = urlParams.get('pausable') === 'true';
+
     // Persistir mensajes (mantener historial completo)
-    const PERSIST_MESSAGES = true; // true = mantener historial, false = auto-eliminar
+    const PERSIST_MESSAGES = false; // true = mantener historial, false = auto-eliminar
 
     // Configuración según modo
     const MAX_MESSAGES_PERSIST = 100;
@@ -258,7 +333,8 @@
     // Iconos de plataformas
     const PLATFORM_ICONS = {
       twitch: '/icons/twitch.png',
-      kick: '/icons/kick.png'
+      kick: '/icons/kick.png',
+      youtube: '/icons/youtube.png'
     };
 
     // ============================================
@@ -266,11 +342,19 @@
     // ============================================
     const messagesContainer = document.getElementById('messages');
     const connectionStatus = document.getElementById('connection-status');
+    const scrollToBottomBtn = document.getElementById('scroll-to-bottom');
+    const pauseIndicator = document.getElementById('pause-indicator');
 
     // Control de rate limiting para mensajes
     let messageQueue = [];
     let isProcessingQueue = false;
     const MESSAGE_PROCESS_INTERVAL = 50; // ms entre mensajes (evita saturación)
+
+    // Control de auto-scroll
+    let isAutoScrollEnabled = true;
+    let isUserScrolling = false;
+    let scrollTimeout = null;
+    let pendingMessagesCount = 0;
 
     // ============================================
     // WEBSOCKET
@@ -357,6 +441,96 @@
     }
 
     // ============================================
+    // CONTROL DE SCROLL
+    // ============================================
+    function isScrolledToBottom() {
+      const threshold = 50; // Píxeles de tolerancia
+      return messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < threshold;
+    }
+
+    function scrollToBottom(smooth = true) {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: smooth ? 'smooth' : 'instant'
+      });
+      enableAutoScroll();
+    }
+
+    function enableAutoScroll() {
+      isAutoScrollEnabled = true;
+      isUserScrolling = false;
+      pendingMessagesCount = 0;
+      if (PAUSABLE_SCROLL_ENABLED) {
+        scrollToBottomBtn.classList.remove('visible');
+        pauseIndicator.classList.remove('visible');
+      }
+      updateScrollButton();
+    }
+
+    function disableAutoScroll() {
+      if (!PAUSABLE_SCROLL_ENABLED) return; // No hacer nada si no está habilitado
+      isAutoScrollEnabled = false;
+      pauseIndicator.classList.add('visible');
+    }
+
+    function updateScrollButton() {
+      if (!PAUSABLE_SCROLL_ENABLED) return; // No hacer nada si no está habilitado
+      if (!isAutoScrollEnabled && pendingMessagesCount > 0) {
+        scrollToBottomBtn.querySelector('span:last-child').textContent = 
+          pendingMessagesCount === 1 
+            ? '1 mensaje nuevo' 
+            : `${pendingMessagesCount} mensajes nuevos`;
+        scrollToBottomBtn.classList.add('visible');
+      } else {
+        scrollToBottomBtn.classList.remove('visible');
+      }
+    }
+
+    // Solo agregar listeners si el scroll pausable está habilitado
+    if (PAUSABLE_SCROLL_ENABLED) {
+      // Detectar scroll del usuario
+      messagesContainer.addEventListener('scroll', () => {
+        if (isUserScrolling) return; // Ignorar si estamos en medio de un scroll programático
+        
+        if (isScrolledToBottom()) {
+          enableAutoScroll();
+        } else {
+          disableAutoScroll();
+        }
+      });
+
+      // Detectar cuando el usuario empieza a scrollear manualmente
+      messagesContainer.addEventListener('wheel', () => {
+        isUserScrolling = true;
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+          isUserScrolling = false;
+          if (!isScrolledToBottom()) {
+            disableAutoScroll();
+          }
+        }, 150);
+      });
+
+      // Pausar auto-scroll al pasar el mouse sobre el chat
+      messagesContainer.addEventListener('mouseenter', () => {
+        if (isScrolledToBottom()) return; // No pausar si ya está abajo
+        disableAutoScroll();
+      });
+
+      // Reanudar auto-scroll al salir el mouse (solo si está al fondo)
+      messagesContainer.addEventListener('mouseleave', () => {
+        if (isScrolledToBottom()) {
+          enableAutoScroll();
+        }
+      });
+
+      // Botón para volver al fondo
+      scrollToBottomBtn.addEventListener('click', () => {
+        scrollToBottom(true);
+      });
+    }
+
+    // ============================================
     // MENSAJES
     // ============================================
     function addMessage(msg) {
@@ -403,8 +577,14 @@
 
       messagesContainer.appendChild(messageEl);
 
-      // Scroll automático (sin animación para mejor rendimiento)
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      // Auto-scroll: siempre activo si PAUSABLE_SCROLL_ENABLED está deshabilitado
+      if (!PAUSABLE_SCROLL_ENABLED || isAutoScrollEnabled) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      } else {
+        // Incrementar contador de mensajes pendientes (solo si pausable está habilitado)
+        pendingMessagesCount++;
+        updateScrollButton();
+      }
 
       // Eliminar mensajes antiguos si hay demasiados
       while (messagesContainer.children.length > MAX_MESSAGES) {
