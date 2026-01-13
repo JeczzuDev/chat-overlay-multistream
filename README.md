@@ -1,22 +1,24 @@
 # Chat Overlay Multistream
 
-Bridge en Node.js que unifica el chat de **Twitch** y **Kick** y lo envía a un overlay HTML para OBS.
+Bridge en Node.js que unifica el chat de **Twitch**, **Kick** y **YouTube Live** en un overlay HTML para OBS.
 
 ![Twitch](https://img.shields.io/badge/Twitch-9146FF?style=flat&logo=twitch&logoColor=white)
 ![Kick](https://img.shields.io/badge/Kick-53FC18?style=flat&logo=kick&logoColor=black)
+![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)
 
 ## Características
 
-- Conexión a chat de Twitch usando tmi.js
-- Conexión real a Kick usando Puppeteer headless
-- Sistema de adaptadores intercambiables para Kick
+- 💜 **Twitch**: Conexión via tmi.js con badges oficiales (API Helix)
+- 💚 **Kick**: Conexión via Puppeteer headless con badges SVG
+- 🔴 **YouTube Live**: Conexión via YouTube Data API v3 con badges
+- Sistema de adaptadores intercambiables
 - Mock de Kick opcional para desarrollo
 - Mensajes unificados en formato común
 - WebSocket para comunicación en tiempo real
-- Overlay HTML listo para OBS
+- Overlay HTML listo para OBS con scroll pausable
 - Renderizado de emotes de Twitch y Kick
-- Badges de MOD, VIP y SUB
+- Badges oficiales con imágenes para las 3 plataformas
 - Auto-reconexión en caso de desconexión
 - Historial de mensajes persistente
 
@@ -66,7 +68,28 @@ Para mostrar las badges oficiales de Twitch (broadcaster, mod, sub, etc.), neces
 
 > **Nota:** Sin estas credenciales, el overlay funcionará pero mostrará badges de texto (MOD, SUB, VIP) en lugar de las imágenes oficiales.
 
-### 5. Iniciar el servidor
+### 5. (Opcional) Configurar YouTube Live
+
+Para mostrar mensajes de YouTube Live, necesitas una API Key de Google:
+
+1. Ve a [Google Cloud Console](https://console.cloud.google.com/)
+2. Crea un proyecto nuevo o selecciona uno existente
+3. Ve a **APIs y Servicios** > **Biblioteca**
+4. Busca y habilita **YouTube Data API v3**
+5. Ve a **APIs y Servicios** > **Credenciales**
+6. Haz clic en **Crear credenciales** > **Clave de API**
+7. Copia la API Key y agrégala a tu `.env`:
+   ```env
+   YOUTUBE_ENABLED=true
+   YOUTUBE_API_KEY=tu_api_key
+   YOUTUBE_VIDEO_ID=id_del_video_en_vivo
+   ```
+
+> **Nota:** El `YOUTUBE_VIDEO_ID` es el código que aparece en la URL después de `watch?v=`. Por ejemplo, si la URL es `https://www.youtube.com/watch?v=dQw4w9WgXcQ`, el ID es `dQw4w9WgXcQ`.
+
+> ⚠️ **Cuota:** YouTube tiene un límite de 10,000 unidades/día. El chat consume ~1 unidad cada 2-5 segundos, suficiente para streams de varias horas.
+
+### 6. Iniciar el servidor
 
 **Opción 1: Manual (npm)**
 
@@ -156,6 +179,7 @@ Para que el servidor inicie con Windows:
 ```
 chat-overlay-multistream/
 ├── server.js                      # Servidor principal (bridge)
+├── youtube-adapter.js             # Adaptador de YouTube Live
 ├── package.json                   # Dependencias
 ├── .env.example                   # Ejemplo de configuración
 ├── .env                           # Tu configuración (NO SUBIR A GIT)
@@ -167,7 +191,8 @@ chat-overlay-multistream/
 │   ├── overlay.html               # Overlay para OBS
 │   └── icons/                     # Iconos de plataformas
 │       ├── twitch.png
-│       └── kick.png
+│       ├── kick.png
+│       └── youtube.png
 ├── start-server.bat               # Script de inicio (Windows CMD)
 ├── start-server.ps1               # Script de inicio (PowerShell)
 ├── start-with-obs.bat             # Script servidor + OBS
@@ -211,9 +236,14 @@ git status
 |----------|-------------|---------|
 | `PORT` | Puerto del servidor | `3000` |
 | `TWITCH_CHANNEL` | Canal de Twitch | `jeczzu` |
+| `TWITCH_CLIENT_ID` | Client ID de Twitch API | - |
+| `TWITCH_CLIENT_SECRET` | Client Secret de Twitch API | - |
 | `KICK_CHANNEL` | Canal de Kick | `jeczzu` |
 | `KICK_ENABLED` | Activar/desactivar Kick | `true` |
 | `KICK_USE_MOCK` | Usar mock en vez de Puppeteer | `false` |
+| `YOUTUBE_ENABLED` | Activar/desactivar YouTube | `false` |
+| `YOUTUBE_API_KEY` | API Key de Google Cloud | - |
+| `YOUTUBE_VIDEO_ID` | ID del video en vivo | - |
 
 ### Personalizar el Overlay
 
