@@ -7,18 +7,18 @@ Bridge en Node.js que unifica el chat de **Twitch**, **Kick** y **YouTube Live**
 ![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)
 
-## Características
+## ✨ Características
 
-- 💜 **Twitch**: Conexión via tmi.js con badges oficiales (API Helix)
+- 💜 **Twitch**: Conexión via `tmi.js` con badges oficiales (API Helix)
 - 💚 **Kick**: Conexión via Puppeteer headless con badges SVG
-- 🔴 **YouTube Live**: Conexión via YouTube Data API v3 con badges
+- 🔴 **YouTube Live**: Conexión via `youtube.js` (InnerTube API) - **Sin límites de cuota**
 - Sistema de adaptadores intercambiables
 - Mock de Kick opcional para desarrollo
 - Mensajes unificados en formato común
 - WebSocket para comunicación en tiempo real
 - Overlay HTML listo para OBS con scroll pausable
-- Renderizado de emotes de Twitch y Kick
-- Badges oficiales con imágenes para las 3 plataformas
+- Renderizado de emotes de Twitch, Kick y YouTube
+- Badges oficiales con imágenes para las 3 plataformas (incluyendo badges personalizadas de YouTube)
 - Auto-reconexión en caso de desconexión
 - Historial de mensajes persistente
 
@@ -68,26 +68,19 @@ Para mostrar las badges oficiales de Twitch (broadcaster, mod, sub, etc.), neces
 
 > **Nota:** Sin estas credenciales, el overlay funcionará pero mostrará badges de texto (MOD, SUB, VIP) en lugar de las imágenes oficiales.
 
-### 5. (Opcional) Configurar YouTube Live
+### 5. Configurar YouTube Live
 
-Para mostrar mensajes de YouTube Live, necesitas una API Key de Google:
+Para mostrar mensajes de YouTube Live, el proyecto usa `youtube.js` (InnerTube API) que **NO requiere API Key** ni tiene límites de cuota.
 
-1. Ve a [Google Cloud Console](https://console.cloud.google.com/)
-2. Crea un proyecto nuevo o selecciona uno existente
-3. Ve a **APIs y Servicios** > **Biblioteca**
-4. Busca y habilita **YouTube Data API v3**
-5. Ve a **APIs y Servicios** > **Credenciales**
-6. Haz clic en **Crear credenciales** > **Clave de API**
-7. Copia la API Key y agrégala a tu `.env`:
-   ```env
-   YOUTUBE_ENABLED=true
-   YOUTUBE_API_KEY=tu_api_key
-   YOUTUBE_VIDEO_ID=id_del_video_en_vivo
-   ```
+Simplemente configura en tu `.env`:
+```env
+YOUTUBE_ENABLED=true
+YOUTUBE_VIDEO_ID=id_del_video_en_vivo
+```
 
 > **Nota:** El `YOUTUBE_VIDEO_ID` es el código que aparece en la URL después de `watch?v=`. Por ejemplo, si la URL es `https://www.youtube.com/watch?v=dQw4w9WgXcQ`, el ID es `dQw4w9WgXcQ`.
 
-> ⚠️ **Cuota:** YouTube tiene un límite de 10,000 unidades/día. El chat consume ~1 unidad cada 2-5 segundos, suficiente para streams de varias horas.
+> ✅ **Sin límites de cuota:** YouTube InnerTube es la API privada que usa YouTube internamente. No consume cuota de YouTube Data API v3.
 
 ### 6. Iniciar el servidor
 
@@ -178,26 +171,32 @@ Para que el servidor inicie con Windows:
 
 ```
 chat-overlay-multistream/
-├── server.js                      # Servidor principal (bridge)
-├── youtube-adapter.js             # Adaptador de YouTube Live
-├── package.json                   # Dependencias
-├── .env.example                   # Ejemplo de configuración
-├── .env                           # Tu configuración (NO SUBIR A GIT)
-├── .gitignore                     # Archivos ignorados por Git
-├── kick-adapters/                 # Sistema de adaptadores de Kick
-│   ├── puppeteer-adapter.js       # Adapter con Puppeteer (actual)
-│   └── ws-adapter.js              # Adapter WebSocket (futuro)
-├── public/
-│   ├── overlay.html               # Overlay para OBS
-│   └── icons/                     # Iconos de plataformas
+├── .env                              # Configuración
+├── .env.example                      # Template de config
+├── .gitignore                        
+├── package.json                      # Dependencias de producción
+├── package-lock.json
+├── README.md                         # Este archivo
+├── MEJORAS_FUTURAS.md                # Roadmap de mejoras
+├── server.js                         # Servidor principal
+├── start-server.bat                  # Scripts de inicio
+├── start-server.ps1
+├── start-with-obs.bat
+│   youtube-innertube-adapter.js      # Adaptador YouTube (InnerTube)
+│
+├── public/                           # Frontend
+│   ├── overlay.html
+│   ├── overlay.css
+│   ├── overlay.js
+│   └── icons/                        # Iconos de plataformas
 │       ├── twitch.png
 │       ├── kick.png
 │       └── youtube.png
-├── start-server.bat               # Script de inicio (Windows CMD)
-├── start-server.ps1               # Script de inicio (PowerShell)
-├── start-with-obs.bat             # Script servidor + OBS
-├── README.md                      # Este archivo
-└── MEJORAS_FUTURAS.md             # Análisis de mejoras
+│
+├── kick-adapters/                    # Sistema de adaptadores de Kick
+│   ├── kick-puppeteer-adapter.js     # Adapter con Puppeteer (producción)
+│   ├── kick-ws-adapter.js            # Adapter WebSocket (experimental)
+│   └── kick-mock-adapter.js          # Adapter Mock (testing)
 ```
 
 ## Seguridad y Git
@@ -242,7 +241,6 @@ git status
 | `KICK_ENABLED` | Activar/desactivar Kick | `true` |
 | `KICK_USE_MOCK` | Usar mock en vez de Puppeteer | `false` |
 | `YOUTUBE_ENABLED` | Activar/desactivar YouTube | `false` |
-| `YOUTUBE_API_KEY` | API Key de Google Cloud | - |
 | `YOUTUBE_VIDEO_ID` | ID del video en vivo | - |
 
 ### Personalizar el Overlay
@@ -272,7 +270,31 @@ El servidor envía mensajes en formato JSON:
 }
 ```
 
-## Notas sobre Kick
+## Notas sobre YouTube Live
+
+### Solución Actual: youtube.js (InnerTube API)
+
+El proyecto usa la librería `youtube.js` que accede a la **InnerTube API** (API privada de YouTube).
+
+**Ventajas:**
+- ✅ **Sin cuota:** No consume YouTube Data API v3
+- ✅ **Sin API Key:** No necesitas credenciales de Google Cloud
+- ✅ **Estable:** Mantenida activamente por la comunidad
+- ✅ **Completa:** Badges personalizadas, emojis, verificaciones
+- ✅ **Latencia aceptable:** ~5-10 segundos
+
+**Configuración:**
+```env
+YOUTUBE_ENABLED=true
+YOUTUBE_VIDEO_ID=tu_video_id
+```
+
+## Disclaimer
+This project is not affiliated with, endorsed, or sponsored by YouTube or any of its affiliates or subsidiaries. All trademarks, logos, and brand names used in this project are the property of their respective owners and are used solely to describe the services provided.
+
+As such, any usage of trademarks to refer to such services is considered nominative use. If you have any questions or concerns, please contact me.
+
+---
 
 ### Sistema de Adaptadores
 
@@ -309,12 +331,31 @@ Esto simula mensajes aleatorios sin abrir Kick real.
 
 ## Contribuir
 
-Las contribuciones son bienvenidas. Si tienes ideas para mejorar el proyecto:
+Las contribuciones son bienvenidas. Para mejorar el proyecto:
 
 1. Fork el repositorio
-2. Crea una rama para tu feature
-3. Haz commit de tus cambios
-4. Abre un Pull Request
+2. Crea una rama para tu feature (`git checkout -b feature/nueva-feature`)
+3. Haz commit de tus cambios (`git commit -m 'Agregar nueva feature'`)
+4. Push a la rama (`git push origin feature/nueva-feature`)
+5. Abre un Pull Request
+
+### Estructura de Branches
+- `main` - Código de producción estable
+- `develop` - Desarrollo activo
+- `feature/*` - Nuevas características
+- `fix/*` - Correcciones de bugs
+
+---
+
+## 📊 Estado del Proyecto
+
+✅ **Producción Ready** - Todas las plataformas funcionando:
+- 💜 Twitch: Estable con `tmi.js`
+- 💚 Kick: Estable con Puppeteer
+- 🔴 YouTube: Estable con `youtube.js` (InnerTube)
+
+**Última actualización:** Enero 2026  
+**Versión:** 1.0.0 (Limpia - Sin código legacy)
 
 ## Licencia
 
@@ -323,3 +364,7 @@ MIT License - Usa este proyecto como quieras.
 ---
 
 Hecho con ❤️ para streamers multiplatform
+
+<p align="right">
+(<a href="#top">back to top</a>)
+</p>
