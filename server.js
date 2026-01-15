@@ -369,6 +369,60 @@ function parseKickEmotes(text, kickEmotes = []) {
     return parts;
 }
 
+/**
+ * Parsear emojis de YouTube
+ * @param {string} text - Texto del mensaje
+ * @param {Array} youtubeEmojis - Array de emojis de YouTube con {id, url, text, isCustom}
+ * @returns {Array<{type: 'text'|'emote', text?: string, id?: string, name?: string, platform?: string, url?: string}>}
+ */
+function parseYouTubeEmojis(text, youtubeEmojis = []) {
+    if (!youtubeEmojis || youtubeEmojis.length === 0) {
+        return [{ type: 'text', text }];
+    }
+
+    const parts = [];
+    let currentIndex = 0;
+    let textCopy = text;
+
+    // Procesar cada emoji en orden de aparición
+    for (const emoji of youtubeEmojis) {
+        const emojiText = emoji.text;
+        const emojiIndex = textCopy.indexOf(emojiText, currentIndex);
+        
+        if (emojiIndex !== -1) {
+            // Agregar texto antes del emoji
+            if (emojiIndex > currentIndex) {
+                const textBefore = textCopy.substring(currentIndex, emojiIndex);
+                if (textBefore) {
+                    parts.push({ type: 'text', text: textBefore });
+                }
+            }
+
+            // Agregar emoji
+            parts.push({
+                type: 'emote',
+                id: emoji.id,
+                name: emoji.text,
+                platform: 'youtube',
+                url: emoji.url,
+                isCustom: emoji.isCustom
+            });
+
+            currentIndex = emojiIndex + emojiText.length;
+        }
+    }
+
+    // Agregar texto restante
+    if (currentIndex < textCopy.length) {
+        const textAfter = textCopy.substring(currentIndex);
+        if (textAfter) {
+            parts.push({ type: 'text', text: textAfter });
+        }
+    }
+
+    return parts;
+}
+
 function createUnifiedMessage(platform, username, message, extra = {}) {
     // Parsear emotes según la plataforma
     let parts = [];
@@ -376,6 +430,8 @@ function createUnifiedMessage(platform, username, message, extra = {}) {
         parts = parseTwitchEmotes(message, extra.emotes);
     } else if (platform === 'kick' && extra.kickEmotes) {
         parts = parseKickEmotes(message, extra.kickEmotes);
+    } else if (platform === 'youtube' && extra.emojis) {
+        parts = parseYouTubeEmojis(message, extra.emojis);
     } else {
         parts = [{ type: 'text', text: message }];
     }
@@ -474,32 +530,66 @@ twitchClient.on('disconnected', (reason) => {
 });
 
 // ============================================
-// CLIENTE YOUTUBE (Adapter)
+// CLIENTE YOUTUBE (InnerTube API - Sin Cuotas)
 // ============================================
 let youtubeClient = null;
 
-if (YOUTUBE_ENABLED && YOUTUBE_API_KEY && YOUTUBE_VIDEO_ID) {
-    console.log('🔴 Usando YouTube Adapter');
-    const YouTubeAdapter = require('./youtube-adapter');
+if (YOUTUBE_ENABLED && YOUTUBE_VIDEO_ID) {
+    console.log('🔴 Usando YouTube InnerTube Adapter (youtube.js - Sin cuotas)');
+    const YouTubeInnertubeAdapter = require('./youtube-innertube-adapter').default;
     
-    youtubeClient = new YouTubeAdapter(YOUTUBE_VIDEO_ID, YOUTUBE_API_KEY, (messageData) => {
-        // Generar imágenes de badges para YouTube
-        const youtubeBadgeImages = getYouTubeBadgeImages(messageData.badges);
+    youtubeClient = new YouTubeInnertubeAdapter();
+    
+    youtubeClient.on('message', (messageData) => {
+        // Las badgeImages vienen de InnerTube solo para badges con custom_thumbnail (miembros)
+        // Para badges estándar (owner, moderator, verified), usamos getYouTubeBadgeImages()
+        const customBadgeImages = messageData.badgeImages || [];
+        const standardBadgeImages = getYouTubeBadgeImages(
+            messageData.badges.map(b => ({ type: b }))
+        );
+        
+        // Merge: priorizar custom_thumbnail (miembros), luego estándares
+        const allBadgeImages = [...customBadgeImages];
+        standardBadgeImages.forEach(standardBadge => {
+          if (!allBadgeImages.find(b => b.type === standardBadge.type)) {
+            allBadgeImages.push(standardBadge);
+          }
+        });
         
         const unifiedMessage = createUnifiedMessage('youtube', messageData.username, messageData.message, {
-            color: PLATFORM_COLORS.youtube,
+            color: messageData.color || PLATFORM_COLORS.youtube,
             badges: messageData.badges,
-            badgeImages: youtubeBadgeImages,
-            isSubscriber: messageData.isMember,
-            isModerator: messageData.isModerator,
-            isVIP: messageData.isChatOwner
+            badgeImages: allBadgeImages,
+            emojis: messageData.emojis, // Incluir emojis de YouTube
+            isSubscriber: messageData.badges.includes('member'),
+            isModerator: messageData.badges.includes('moderator'),
+            isVIP: messageData.badges.includes('verified'),
+            isSuperChat: messageData.isSuperChat,
+            superChatAmount: messageData.superChatAmount
         });
         
         console.log(`🔴 [YOUTUBE] ${unifiedMessage.username}: ${messageData.message}`);
         broadcast(unifiedMessage);
     });
+    
+    youtubeClient.on('connected', () => {
+        console.log('🔴 YouTube InnerTube conectado correctamente');
+    });
+    
+    youtubeClient.on('error', (error) => {
+        console.error('🔴 Error en YouTube InnerTube:', error);
+    });
+    
+    youtubeClient.on('disconnected', () => {
+        console.log('🔴 YouTube InnerTube desconectado');
+    });
+    
+    // Conectar al chat
+    youtubeClient.connect(YOUTUBE_VIDEO_ID).catch(error => {
+        console.error('🔴 Error al conectar YouTube InnerTube:', error);
+    });
 } else if (YOUTUBE_ENABLED) {
-    console.log('🔴 YouTube habilitado pero falta YOUTUBE_API_KEY o YOUTUBE_VIDEO_ID');
+    console.log('🔴 YouTube habilitado pero falta YOUTUBE_VIDEO_ID');
 } else {
     console.log('🔴 YouTube deshabilitado');
 }
@@ -636,14 +726,8 @@ server.listen(PORT, async () => {
     // Conectar a Twitch
     twitchClient.connect().catch(console.error);
     
-    // Iniciar YouTube (si está habilitado)
-    if (youtubeClient) {
-        try {
-            await youtubeClient.start();
-        } catch (error) {
-            console.error('🔴 Error al iniciar YouTube:', error.message);
-        }
-    }
+    // YouTube InnerTube se conecta automáticamente en la inicialización
+    // (No necesita llamada a start() como el adaptador REST)
     
     // Iniciar Kick (si está habilitado)
     if (kickClient) {
