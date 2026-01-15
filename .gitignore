@@ -18,6 +18,10 @@ lerna-debug.log*
 # Puppeteer cache y descargas
 .cache/
 .local-chromium/
+
+# Legacy code (archivado pero no se sube a producción)
+# Descomentar si no quieres incluir el archivo en Git
+archive/
 *.crdownload
 
 # OS
