@@ -316,9 +316,9 @@
     // Detectar parámetro de URL para scroll pausable
     const urlParams = new URLSearchParams(globalThis.location.search);
     const PAUSABLE_SCROLL_ENABLED = urlParams.get('pausable') === 'true';
-
     // Persistir mensajes (mantener historial completo)
-    const PERSIST_MESSAGES = false; // true = mantener historial, false = auto-eliminar
+    const PERSIST_MESSAGES = urlParams.get('persist') === 'true';
+
 
     // Configuración según modo
     const MAX_MESSAGES_PERSIST = 100;
