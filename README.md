@@ -35,6 +35,14 @@ npm install
 
 **Nota:** Puppeteer descargará automáticamente Chromium (~300MB). Esto puede tardar unos minutos.
 
+> **Al actualizar dependencias:** cada versión de Puppeteer va atada a una versión concreta de Chrome. Si tras un `npm update` Kick falla con `Could not find Chrome (ver. X)`, descarga la que toca:
+>
+> ```bash
+> npx puppeteer browsers install chrome
+> ```
+>
+> Las versiones antiguas se quedan en `~/.cache/puppeteer` y se pueden borrar a mano para recuperar espacio.
+
 ### 3. Configurar variables de entorno
    ```bash
    cp .env.example .env
