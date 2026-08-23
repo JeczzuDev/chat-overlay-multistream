@@ -294,6 +294,27 @@ app.post('/api/youtube/video', async (req, res) => {
     }
 });
 
+// ============================================
+// API DE MENSAJES
+// ============================================
+
+// Borrar un mensaje: lo saca del historial y avisa a todos los clientes,
+// para que desaparezca a la vez en el navegador y en OBS y no vuelva al refrescar
+app.delete('/api/messages/:id', (req, res) => {
+    const { id } = req.params;
+    const index = messageHistory.findIndex(msg => msg.id === id);
+
+    if (index === -1) {
+        return res.status(404).json({ error: `No existe el mensaje ${id}` });
+    }
+
+    messageHistory.splice(index, 1);
+    broadcastControl({ type: 'delete', id });
+
+    console.log(`🗑️  Mensaje borrado: ${id}`);
+    res.json({ ok: true, id });
+});
+
 // Clientes WebSocket conectados
 const clients = new Set();
 
@@ -527,23 +548,37 @@ function getRandomColor() {
     return USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)];
 }
 
-// Enviar mensaje a todos los clientes
-function broadcast(message) {
-    // Agregar al historial
-    messageHistory.push(message);
-    
-    // Mantener solo los últimos MAX_HISTORY mensajes
-    if (messageHistory.length > MAX_HISTORY) {
-        messageHistory.shift();
-    }
-    
-    // Broadcast a clientes conectados
-    const data = JSON.stringify(message);
+// Enviar a todos los clientes conectados (sin tocar el historial)
+function sendToClients(payload) {
+    const data = JSON.stringify(payload);
     clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(data);
         }
     });
+}
+
+// Enviar mensaje de chat a todos los clientes
+function broadcast(message) {
+    // Agregar al historial
+    messageHistory.push(message);
+
+    // Mantener solo los últimos MAX_HISTORY mensajes
+    if (messageHistory.length > MAX_HISTORY) {
+        messageHistory.shift();
+    }
+
+    sendToClients(message);
+}
+
+/**
+ * Enviar un aviso de control (no es un mensaje de chat).
+ * Va aparte de broadcast() porque estos avisos NO deben entrar en el
+ * historial: si entraran, se reenviarían a cada cliente que conecte.
+ * @param {object} payload - lleva `type` para que el overlay lo distinga
+ */
+function broadcastControl(payload) {
+    sendToClients(payload);
 }
 
 // ============================================
