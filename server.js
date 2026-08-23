@@ -4,6 +4,7 @@ const http = require('node:http');
 const WebSocket = require('ws');
 const tmi = require('tmi.js');
 const path = require('node:path');
+const { resolveLiveVideoId, extractVideoId } = require('./youtube-live-resolver.js');
 
 // ============================================
 // CONFIGURACIÓN
@@ -14,10 +15,19 @@ const KICK_CHANNEL = process.env.KICK_CHANNEL || 'jeczzu';
 const KICK_ENABLED = process.env.KICK_ENABLED !== 'false';
 const KICK_USE_MOCK = process.env.KICK_USE_MOCK === 'true';
 
-// YouTube
-const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || '';
-const YOUTUBE_VIDEO_ID = process.env.YOUTUBE_VIDEO_ID || '';
+// YouTube (InnerTube - sin API key ni OAuth)
 const YOUTUBE_ENABLED = process.env.YOUTUBE_ENABLED === 'true';
+// Canal del que autodetectar el directo ('@handle' o 'UCxxxx')
+const YOUTUBE_CHANNEL = process.env.YOUTUBE_CHANNEL || '';
+// Override manual opcional: si está puesto, se salta la autodetección
+const YOUTUBE_VIDEO_ID_OVERRIDE = process.env.YOUTUBE_VIDEO_ID || '';
+
+// Estado mutable de la conexión de YouTube
+let currentYouTubeVideoId = null;
+let youtubePollTimer = null;
+
+// Intervalo de sondeo del directo (ms)
+const YOUTUBE_POLL_INTERVAL = 90000; // 90 segundos
 
 // Constantes de historial y mensajes
 const MAX_HISTORY = 100;
@@ -220,8 +230,69 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// Parsear body JSON (necesario para los endpoints de control)
+app.use(express.json());
+
 // Servir archivos estáticos (overlay)
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ============================================
+// API DE CONTROL DE YOUTUBE
+// ============================================
+
+// Estado actual de la conexión de YouTube
+app.get('/api/youtube/status', (req, res) => {
+    res.json({
+        enabled: YOUTUBE_ENABLED,
+        channel: YOUTUBE_CHANNEL || null,
+        videoId: currentYouTubeVideoId,
+        searching: youtubePollTimer !== null,
+        ...(youtubeClient ? youtubeClient.getStats() : { connected: false })
+    });
+});
+
+// Forzar un video concreto, o re-escanear el canal si no se pasa ninguno
+app.post('/api/youtube/video', async (req, res) => {
+    if (!youtubeClient) {
+        return res.status(409).json({ error: 'YouTube está deshabilitado (YOUTUBE_ENABLED=false)' });
+    }
+
+    const input = req.body?.videoId || req.body?.url;
+
+    // Sin body: re-escanear el canal
+    if (!input) {
+        if (!YOUTUBE_CHANNEL) {
+            return res.status(400).json({ error: 'No hay YOUTUBE_CHANNEL configurado para re-escanear' });
+        }
+
+        const found = await resolveLiveVideoId(YOUTUBE_CHANNEL);
+        if (!found) {
+            return res.status(404).json({ error: `El canal ${YOUTUBE_CHANNEL} no está en directo`, channel: YOUTUBE_CHANNEL });
+        }
+
+        try {
+            await connectYouTube(found);
+            return res.json({ ok: true, videoId: found, source: 'autodetect' });
+        } catch (error) {
+            return res.status(500).json({ error: error.message });
+        }
+    }
+
+    // Con body: usar el ID/URL indicado
+    const videoId = extractVideoId(input);
+    if (!videoId) {
+        return res.status(400).json({ error: `No se pudo extraer un ID de video de: ${input}` });
+    }
+
+    try {
+        await connectYouTube(videoId);
+        // El sondeo ya no tiene sentido si nos han dado un ID a mano
+        stopYouTubePolling();
+        res.json({ ok: true, videoId, source: 'manual' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // Clientes WebSocket conectados
 const clients = new Set();
@@ -534,12 +605,16 @@ twitchClient.on('disconnected', (reason) => {
 // ============================================
 let youtubeClient = null;
 
-if (YOUTUBE_ENABLED && YOUTUBE_VIDEO_ID) {
+if (YOUTUBE_ENABLED) {
     console.log('🔴 Usando YouTube InnerTube Adapter (youtube.js - Sin cuotas)');
     const YouTubeInnertubeAdapter = require('./youtube-innertube-adapter').default;
-    
+
     youtubeClient = new YouTubeInnertubeAdapter();
-    
+
+    // Los listeners se registran una única vez sobre el EventEmitter del adapter,
+    // así que sobreviven a los ciclos disconnect/connect sin duplicarse.
+    // El cliente existe siempre que YouTube esté habilitado, aunque todavía no
+    // se conozca el ID del directo.
     youtubeClient.on('message', (messageData) => {
         // Las badgeImages vienen de InnerTube solo para badges con custom_thumbnail (miembros)
         // Para badges estándar (owner, moderator, verified), usamos getYouTubeBadgeImages()
@@ -573,25 +648,121 @@ if (YOUTUBE_ENABLED && YOUTUBE_VIDEO_ID) {
     });
     
     youtubeClient.on('connected', () => {
-        console.log('🔴 YouTube InnerTube conectado correctamente');
+        console.log(`🔴 YouTube InnerTube conectado correctamente (video: ${currentYouTubeVideoId})`);
+        // Ya hay directo enganchado: dejar de buscar
+        stopYouTubePolling();
     });
-    
+
     youtubeClient.on('error', (error) => {
         console.error('🔴 Error en YouTube InnerTube:', error);
     });
-    
+
     youtubeClient.on('disconnected', () => {
-        console.log('🔴 YouTube InnerTube desconectado');
+        console.log('🔴 YouTube InnerTube desconectado (directo finalizado)');
+        currentYouTubeVideoId = null;
+        console.log('🔴 Para enganchar otro directo: POST /api/youtube/video');
     });
-    
-    // Conectar al chat
-    youtubeClient.connect(YOUTUBE_VIDEO_ID).catch(error => {
-        console.error('🔴 Error al conectar YouTube InnerTube:', error);
-    });
-} else if (YOUTUBE_ENABLED) {
-    console.log('🔴 YouTube habilitado pero falta YOUTUBE_VIDEO_ID');
 } else {
     console.log('🔴 YouTube deshabilitado');
+}
+
+/**
+ * Conectar el adapter de YouTube a un video concreto
+ * Desconecta antes si ya había una sesión activa
+ * @param {string} videoId
+ */
+async function connectYouTube(videoId) {
+    if (!youtubeClient) {
+        throw new Error('YouTube está deshabilitado');
+    }
+
+    if (youtubeClient.isConnected) {
+        await youtubeClient.stop();
+    }
+
+    // Se asigna ANTES de conectar porque el evento 'connected' puede dispararse
+    // durante connect(); si falla, se revierte para que el estado no mienta
+    currentYouTubeVideoId = videoId;
+
+    try {
+        await youtubeClient.connect(videoId);
+    } catch (error) {
+        currentYouTubeVideoId = null;
+        throw error;
+    }
+}
+
+/**
+ * Detener el sondeo del directo
+ */
+function stopYouTubePolling() {
+    if (youtubePollTimer) {
+        clearInterval(youtubePollTimer);
+        youtubePollTimer = null;
+    }
+}
+
+/**
+ * Sondear el canal hasta encontrar un directo activo
+ * Se detiene solo al conectar (ver el handler de 'connected')
+ */
+function startYouTubePolling() {
+    if (youtubePollTimer || !YOUTUBE_CHANNEL) return;
+
+    console.log(`🔴 Buscando directo en ${YOUTUBE_CHANNEL} cada ${YOUTUBE_POLL_INTERVAL / 1000}s...`);
+
+    youtubePollTimer = setInterval(async () => {
+        const videoId = await resolveLiveVideoId(YOUTUBE_CHANNEL);
+
+        if (videoId) {
+            console.log(`🔴 ¡Directo detectado! Video: ${videoId}`);
+            try {
+                await connectYouTube(videoId);
+            } catch (error) {
+                console.error('🔴 Error al conectar YouTube InnerTube:', error.message);
+            }
+        }
+    }, YOUTUBE_POLL_INTERVAL);
+}
+
+/**
+ * Arrancar YouTube: override manual si existe, si no autodetectar por canal
+ */
+async function startYouTube() {
+    if (!youtubeClient) return;
+
+    // 1. Override manual desde .env
+    if (YOUTUBE_VIDEO_ID_OVERRIDE) {
+        console.log(`🔴 Usando YOUTUBE_VIDEO_ID manual: ${YOUTUBE_VIDEO_ID_OVERRIDE}`);
+        try {
+            await connectYouTube(YOUTUBE_VIDEO_ID_OVERRIDE);
+        } catch (error) {
+            console.error('🔴 Error al conectar YouTube InnerTube:', error.message);
+        }
+        return;
+    }
+
+    // 2. Autodetección por canal
+    if (!YOUTUBE_CHANNEL) {
+        console.log('🔴 YouTube habilitado pero falta YOUTUBE_CHANNEL (o YOUTUBE_VIDEO_ID)');
+        return;
+    }
+
+    console.log(`🔴 Autodetectando directo del canal ${YOUTUBE_CHANNEL}...`);
+    const videoId = await resolveLiveVideoId(YOUTUBE_CHANNEL);
+
+    if (videoId) {
+        console.log(`🔴 Directo encontrado: ${videoId}`);
+        try {
+            await connectYouTube(videoId);
+        } catch (error) {
+            console.error('🔴 Error al conectar YouTube InnerTube:', error.message);
+        }
+        return;
+    }
+
+    console.log('🔴 El canal no está en directo ahora mismo');
+    startYouTubePolling();
 }
 
 // ============================================
@@ -716,19 +887,19 @@ server.listen(PORT, async () => {
     console.log('📺 Plataformas:');
     console.log(`   💜 Twitch: #${TWITCH_CHANNEL}`);
     console.log(`   💚 Kick: ${KICK_ENABLED ? '#' + KICK_CHANNEL : 'Deshabilitado'}`);
-    console.log(`   🔴 YouTube: ${YOUTUBE_ENABLED ? YOUTUBE_VIDEO_ID : 'Deshabilitado'}`);
+    console.log(`   🔴 YouTube: ${YOUTUBE_ENABLED ? (YOUTUBE_CHANNEL || YOUTUBE_VIDEO_ID_OVERRIDE || 'Sin canal') : 'Deshabilitado'}`);
     console.log('═══════════════════════════════════════════');
-    
+
     // Obtener token de Twitch y cargar badges globales
     await getTwitchAppToken();
     await loadTwitchGlobalBadges();
-    
+
     // Conectar a Twitch
     twitchClient.connect().catch(console.error);
-    
-    // YouTube InnerTube se conecta automáticamente en la inicialización
-    // (No necesita llamada a start() como el adaptador REST)
-    
+
+    // Iniciar YouTube (autodetecta el directo o usa el override manual)
+    await startYouTube();
+
     // Iniciar Kick (si está habilitado)
     if (kickClient) {
         try {
@@ -744,11 +915,13 @@ server.listen(PORT, async () => {
 // ============================================
 process.on('SIGINT', async () => {
     console.log('\n🛑 Cerrando servidor...');
-    
+
+    stopYouTubePolling();
+
     if (youtubeClient) {
         await youtubeClient.stop();
     }
-    
+
     if (kickClient) {
         await kickClient.stop();
     }

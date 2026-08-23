@@ -72,15 +72,44 @@ Para mostrar las badges oficiales de Twitch (broadcaster, mod, sub, etc.), neces
 
 Para mostrar mensajes de YouTube Live, el proyecto usa `youtube.js` (InnerTube API) que **NO requiere API Key** ni tiene límites de cuota.
 
-Simplemente configura en tu `.env`:
+Basta con indicar tu canal: el servidor **detecta solo el ID del directo** cuando sales al aire.
+
 ```env
 YOUTUBE_ENABLED=true
-YOUTUBE_VIDEO_ID=id_del_video_en_vivo
+YOUTUBE_CHANNEL=@tu_canal
+YOUTUBE_VIDEO_ID=
 ```
 
-> **Nota:** El `YOUTUBE_VIDEO_ID` es el código que aparece en la URL después de `watch?v=`. Por ejemplo, si la URL es `https://www.youtube.com/watch?v=dQw4w9WgXcQ`, el ID es `dQw4w9WgXcQ`.
+**Cómo funciona la autodetección:**
+
+1. Al arrancar, el servidor resuelve `youtube.com/@tu_canal/live`.
+2. Si estás en directo, engancha el chat al instante.
+3. Si no, sondea cada 90 s hasta que el directo empiece, y entonces conecta solo.
+4. Una vez conectado, deja de sondear.
+
+> ⚠️ **El directo debe ser PÚBLICO.** Los directos no listados o privados son invisibles para InnerTube anónimo; esos sí requerirían OAuth. Si programas el directo en Studio, basta con que sea público al salir al aire.
+
+> **Override manual:** si rellenas `YOUTUBE_VIDEO_ID` se salta la autodetección y conecta a ese video. Es el código después de `watch?v=` en la URL: para `https://www.youtube.com/watch?v=dQw4w9WgXcQ` el ID es `dQw4w9WgXcQ`. Déjalo vacío para autodetectar.
 
 > ✅ **Sin límites de cuota:** YouTube InnerTube es la API privada que usa YouTube internamente. No consume cuota de YouTube Data API v3.
+
+**Control sin reiniciar el servidor:**
+
+```bash
+# Ver el estado actual
+curl http://localhost:3000/api/youtube/status
+
+# Forzar un video (acepta ID o URL completa)
+curl -X POST http://localhost:3000/api/youtube/video \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+
+# Re-escanear el canal (body vacío) — útil para enganchar un segundo directo
+curl -X POST http://localhost:3000/api/youtube/video \
+  -H "Content-Type: application/json" -d '{}'
+```
+
+> **Nota:** al terminar un directo, el servidor no vuelve a sondear solo. Para enganchar el siguiente, usa el re-escaneo de arriba o reinicia.
 
 ### 6. Iniciar el servidor
 
@@ -241,7 +270,8 @@ git status
 | `KICK_ENABLED` | Activar/desactivar Kick | `true` |
 | `KICK_USE_MOCK` | Usar mock en vez de Puppeteer | `false` |
 | `YOUTUBE_ENABLED` | Activar/desactivar YouTube | `false` |
-| `YOUTUBE_VIDEO_ID` | ID del video en vivo | - |
+| `YOUTUBE_CHANNEL` | Canal del que autodetectar el directo (`@handle` o `UCxxxx`) | - |
+| `YOUTUBE_VIDEO_ID` | Override manual del video. Vacío = autodetectar por canal | - |
 
 ### Personalizar el Overlay
 
@@ -282,12 +312,19 @@ El proyecto usa la librería `youtube.js` que accede a la **InnerTube API** (API
 - ✅ **Estable:** Mantenida activamente por la comunidad
 - ✅ **Completa:** Badges personalizadas, emojis, verificaciones
 - ✅ **Latencia aceptable:** ~5-10 segundos
+- ✅ **Autodetección:** Encuentra el ID del directo a partir del canal
 
 **Configuración:**
 ```env
 YOUTUBE_ENABLED=true
-YOUTUBE_VIDEO_ID=tu_video_id
+YOUTUBE_CHANNEL=@tu_canal
+YOUTUBE_VIDEO_ID=
 ```
+
+**Cómo se autodetecta el directo:** `resolveURL()` sobre `youtube.com/@canal/live` devuelve un
+`watchEndpoint` con el `videoId` cuando el canal está emitiendo, y un `browseEndpoint`
+(la pestaña "En vivo") cuando no lo está. Esa diferencia es el detector, y no cuesta cuota.
+Ver `youtube-live-resolver.js`.
 
 ## Disclaimer
 This project is not affiliated with, endorsed, or sponsored by YouTube or any of its affiliates or subsidiaries. All trademarks, logos, and brand names used in this project are the property of their respective owners and are used solely to describe the services provided.

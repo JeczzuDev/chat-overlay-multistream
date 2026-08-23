@@ -1,5 +1,6 @@
 import EventEmitter from 'events';
-import { Innertube, YTNodes } from 'youtubei.js';
+import { YTNodes } from 'youtubei.js';
+import { getInnertube } from './youtube-innertube-client.js';
 
 /**
  * YouTube InnerTube Adapter
@@ -23,8 +24,8 @@ export default class YouTubeInnertubeAdapter extends EventEmitter {
     try {
       console.log(`[YouTube InnerTube] Inicializando cliente para video: ${videoId}`);
       
-      // Crear instancia de Innertube
-      this.innertube = await Innertube.create();
+      // Obtener la instancia compartida de Innertube
+      this.innertube = await getInnertube();
       
       // Obtener información del video
       const info = await this.innertube.getInfo(videoId);
@@ -348,16 +349,25 @@ export default class YouTubeInnertubeAdapter extends EventEmitter {
 
   /**
    * Desconectar del chat
+   * Solo suelta la referencia local a innertube; la instancia compartida sigue viva
    */
   disconnect() {
     if (this.livechat) {
       this.livechat.stop();
       this.livechat = null;
     }
-    
+
     this.isConnected = false;
     this.innertube = null;
     console.log('[YouTube InnerTube] Desconectado');
+  }
+
+  /**
+   * Alias de disconnect() para unificar la interfaz con los adapters de Kick
+   * (start/stop/restart). server.js llama a stop() al cerrar.
+   */
+  async stop() {
+    this.disconnect();
   }
 
   /**
