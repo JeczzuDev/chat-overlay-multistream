@@ -14,6 +14,10 @@
 
     :root {
       color-scheme: dark;
+
+      /* Opacidad de los mensajes. Ajustar aquí para todo el overlay. */
+      --msg-bg-alpha: 0.85;
+      --msg-border-alpha: 0.85;
     }
 
     body {
@@ -43,6 +47,11 @@
       gap: 8px;
       overflow-y: auto;
       overflow-x: hidden;
+      padding: 1rem;
+      /* min-height:0 es imprescindible: sin él, un hijo flex en columna no
+         encoge y la lista desborda el contenedor en vez de hacer scroll */
+      min-height: 0;
+      flex: 0 1 auto;
       scrollbar-width: none; /* Firefox */
       -ms-overflow-style: none; /* IE/Edge */
     }
@@ -51,59 +60,101 @@
       display: none; /* Chrome/Safari/Opera */
     }
 
-    /* Botón de "ponerse al día" */
-    #scroll-to-bottom {
-      position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.85);
-      color: #fff;
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      padding: 8px 16px;
+    /* Barra de estado de la pausa.
+       En flujo normal (NO absolute) para que ocupe su propio espacio y
+       nunca tape los mensajes. */
+    /* La barra reserva su hueco SIEMPRE (visibility, no display).
+       Si apareciera y desapareciera, la lista se desplazaría al pausar
+       —justify-content es flex-end— y el mensaje bajo el cursor cambiaría
+       solo, moviendo el resaltado a su vecino. */
+    #chat-status-bar {
+      flex-shrink: 0;
+      margin-top: 8px;
+      visibility: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 7px 14px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid rgba(255, 152, 0, 0.55);
       border-radius: 20px;
-      font-size: 13px;
+      color: #fff;
+      font-size: 12px;
       font-weight: 600;
-      cursor: pointer;
+      font-family: inherit;
+      width: 100%;
+      cursor: default;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+
+    #chat-status-bar.visible {
+      visibility: visible;
+    }
+
+    /* Sin pausa (OBS) la barra no puede aparecer nunca: no reservar su hueco */
+    #chat-container.no-pause #chat-status-bar {
+      display: none;
+    }
+
+    /* Borde blanco cuando hay un mensaje seleccionado, para que case
+       con el resaltado del propio mensaje */
+    #chat-status-bar.has-selection {
+      border-color: rgba(255, 255, 255, 0.65);
+    }
+
+    #chat-status-bar .pause-label {
+      color: #ffb74d;
+      white-space: nowrap;
+    }
+
+    #chat-status-bar.has-selection .pause-label {
+      color: #fff;
+    }
+
+    /* Acciones de la barra */
+    .bar-action {
       display: none;
       align-items: center;
-      gap: 6px;
-      transition: all 0.2s ease;
-      z-index: 100;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-    }
-
-    #scroll-to-bottom:hover {
-      background: rgba(50, 50, 50, 0.95);
-      border-color: rgba(255, 255, 255, 0.5);
-    }
-
-    #scroll-to-bottom.visible {
-      display: flex;
-    }
-
-    #scroll-to-bottom .arrow {
-      font-size: 10px;
-    }
-
-    /* Indicador de pausa */
-    #pause-indicator {
-      position: absolute;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(255, 152, 0, 0.9);
-      color: #000;
-      padding: 4px 12px;
+      gap: 5px;
+      padding: 3px 10px;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 12px;
-      font-size: 11px;
+      color: #fff;
+      font-size: 12px;
       font-weight: 600;
-      display: none;
-      z-index: 100;
+      font-family: inherit;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
     }
 
-    #pause-indicator.visible {
-      display: block;
+    .bar-action.visible {
+      display: inline-flex;
+    }
+
+    .bar-action:hover {
+      background: rgba(255, 255, 255, 0.22);
+      border-color: rgba(255, 255, 255, 0.45);
+    }
+
+    .bar-action.danger:hover {
+      background: rgba(244, 67, 54, 0.85);
+      border-color: rgba(244, 67, 54, 1);
+    }
+
+    #chat-status-bar .separator {
+      display: none;
+      opacity: 0.35;
+    }
+
+    #chat-status-bar .separator.visible {
+      display: inline;
+    }
+
+    #chat-status-bar .arrow {
+      font-size: 9px;
     }
 
     .message {
@@ -112,23 +163,43 @@
       justify-content: flex-start;
       gap: 10px;
       padding: 14px;
-      background: rgba(0, 0, 0, 1);
+      background: rgba(0, 0, 0, var(--msg-bg-alpha));
       border-radius: .25rem;
       animation: slideIn 0.3s ease-out;
-      border-left: 4px solid var(--platform-color, #fff);
+      border-left: 4px solid rgba(var(--platform-rgb, 255, 255, 255), var(--msg-border-alpha));
+      transition: box-shadow 0.15s ease, border-left-color 0.15s ease;
     }
 
+    /* Mensaje enfocado o seleccionado: borde blanco y se tapa el de plataforma.
+       El contorno va con box-shadow y NO con border: un border real cambiaría
+       las dimensiones del mensaje y daría un salto de layout al pasar el cursor.
+
+       La clase .hovered la pone el JS en vez de usar :hover, por dos razones:
+       el resaltado siempre coincide con el mensaje que realmente dispara la
+       pausa, y con ?pausable=false no se resalta nada (no sería interactivo). */
+    .message.hovered {
+      border-left-color: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+      cursor: pointer;
+    }
+
+    .message.selected {
+      border-left-color: #fff;
+      box-shadow: 0 0 0 2px #fff, 0 0 12px rgba(255, 255, 255, 0.35);
+    }
+
+    /* Colores de plataforma como tripletas RGB para poder aplicarles alfa */
     .message.twitch {
       display: flex;
-      --platform-color: #9146FF;
+      --platform-rgb: 145, 70, 255;
     }
 
     .message.kick {
-      --platform-color: #53FC18;
+      --platform-rgb: 83, 252, 24;
     }
 
     .message.youtube {
-      --platform-color: #FF0000;
+      --platform-rgb: 255, 0, 0;
     }
 
     @keyframes slideIn {
@@ -299,12 +370,18 @@
   <div id="connection-status" class="connecting">Conectando...</div>
 
   <div id="chat-container">
-    <div id="pause-indicator">⏸ Chat pausado</div>
     <div id="messages"></div>
-    <button id="scroll-to-bottom">
-      <span class="arrow">▼</span>
-      <span>Ver mensajes nuevos</span>
-    </button>
+    <!-- div y no button: dentro van botones, y no se pueden anidar -->
+    <div id="chat-status-bar">
+      <span class="pause-label">⏸ Chat pausado</span>
+      <span class="separator">·</span>
+      <button class="bar-action" id="bar-pending" type="button">
+        <span class="arrow">▼</span>
+        <span class="pending-text">0 mensajes nuevos</span>
+      </button>
+      <button class="bar-action danger" id="bar-delete" type="button">🗑 Borrar</button>
+      <button class="bar-action" id="bar-resume" type="button">✕ Reanudar</button>
+    </div>
   </div>
 
   <script>
@@ -313,9 +390,9 @@
     // ============================================
     const WS_URL = `ws://${globalThis.location.host}`;
 
-    // Detectar parámetro de URL para scroll pausable
+    // Detectar parámetro de URL para scroll pausable (activo por defecto)
     const urlParams = new URLSearchParams(globalThis.location.search);
-    const PAUSABLE_SCROLL_ENABLED = urlParams.get('pausable') === 'true';
+    const PAUSABLE_ENABLED = urlParams.get('pausable') !== 'false';
     // Persistir mensajes (mantener historial completo)
     const PERSIST_MESSAGES = urlParams.get('persist') === 'true';
 
@@ -324,7 +401,11 @@
     const MAX_MESSAGES_PERSIST = 100;
     const MAX_MESSAGES_TRANSIENT = 15;
     const MAX_MESSAGES = PERSIST_MESSAGES ? MAX_MESSAGES_PERSIST : MAX_MESSAGES_TRANSIENT;
+    // Tope de seguridad mientras el chat está pausado: no se recorta nada
+    // hasta llegar aquí, para no borrar lo que el usuario está leyendo
+    const MAX_MESSAGES_PAUSED = 300;
     const MESSAGE_LIFETIME_MS = 60000; // 60 segundos (solo aplica si PERSIST_MESSAGES = false)
+    const EXPIRY_SWEEP_INTERVAL_MS = 1000; // cada cuánto se buscan mensajes caducados
     const HIDE_STATUS_AFTER_MS = 5000; // Ocultar status después de 5s
     const RECONNECT_MAX_ATTEMPTS = 10;
     const RECONNECT_BASE_DELAY_MS = 1000;
@@ -342,19 +423,32 @@
     // ============================================
     const messagesContainer = document.getElementById('messages');
     const connectionStatus = document.getElementById('connection-status');
-    const scrollToBottomBtn = document.getElementById('scroll-to-bottom');
-    const pauseIndicator = document.getElementById('pause-indicator');
+    const statusBar = document.getElementById('chat-status-bar');
+    const pendingText = statusBar.querySelector('.pending-text');
+    const separator = statusBar.querySelector('.separator');
+    const barPending = document.getElementById('bar-pending');
+    const barDelete = document.getElementById('bar-delete');
+    const barResume = document.getElementById('bar-resume');
 
     // Control de rate limiting para mensajes
     let messageQueue = [];
     let isProcessingQueue = false;
     const MESSAGE_PROCESS_INTERVAL = 50; // ms entre mensajes (evita saturación)
 
-    // Control de auto-scroll
-    let isAutoScrollEnabled = true;
+    // Estado de pausa: tres causas independientes porque se sueltan distinto.
+    // El hover se suelta solo al salir del mensaje; la selección por click
+    // solo se libera desde la barra inferior.
+    let hoverPaused = false;         // el cursor está sobre un mensaje
+    let scrollPaused = false;        // el usuario scrolleó hacia arriba
+    let selectedMessageId = null;    // mensaje fijado con click
+    let pauseStartedAt = null;       // para congelar el reloj de caducidad
     let isUserScrolling = false;
     let scrollTimeout = null;
     let pendingMessagesCount = 0;
+
+    function isPaused() {
+      return PAUSABLE_ENABLED && (hoverPaused || scrollPaused || selectedMessageId !== null);
+    }
 
     // ============================================
     // WEBSOCKET
@@ -379,6 +473,15 @@
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+
+          // Los avisos de control llevan `type`; los mensajes de chat no.
+          // Hay que ramificar antes de encolar o se renderizarían como
+          // un mensaje roto.
+          if (message.type === 'delete') {
+            removeMessageById(message.id);
+            return;
+          }
+
           // Agregar a cola en lugar de procesar inmediatamente
           messageQueue.push(message);
           processMessageQueue();
@@ -453,49 +556,139 @@
         top: messagesContainer.scrollHeight,
         behavior: smooth ? 'smooth' : 'instant'
       });
-      enableAutoScroll();
+      resumeChat();
     }
 
-    function enableAutoScroll() {
-      isAutoScrollEnabled = true;
+    /**
+     * Reanudar el chat: se acabaron las dos causas de pausa.
+     * Devuelve al reloj de caducidad el tiempo que estuvo congelado y
+     * recorta de golpe lo que no se recortó durante la pausa.
+     */
+    function resumeChat() {
+      hoverPaused = false;
+      scrollPaused = false;
       isUserScrolling = false;
       pendingMessagesCount = 0;
-      if (PAUSABLE_SCROLL_ENABLED) {
-        scrollToBottomBtn.classList.remove('visible');
-        pauseIndicator.classList.remove('visible');
+      clearSelection();
+
+      // pauseStartedAt es la fuente de verdad de "veníamos de una pausa":
+      // los flags pueden haber sido limpiados ya por quien nos llama
+      if (pauseStartedAt !== null) {
+        shiftExpiries(Date.now() - pauseStartedAt);
+        pauseStartedAt = null;
       }
-      updateScrollButton();
+
+      updateStatusBar();
+      trimMessages();
     }
 
-    function disableAutoScroll() {
-      if (!PAUSABLE_SCROLL_ENABLED) return; // No hacer nada si no está habilitado
-      isAutoScrollEnabled = false;
-      pauseIndicator.classList.add('visible');
+    /**
+     * Marcar el chat como pausado por una de las tres causas.
+     * @param {'hover'|'scroll'|'select'} reason
+     */
+    function pauseChat(reason) {
+      if (!PAUSABLE_ENABLED) return;
+
+      // Arrancar el cronómetro de la pausa solo la primera vez
+      if (!isPaused()) pauseStartedAt = Date.now();
+
+      if (reason === 'hover') hoverPaused = true;
+      else if (reason === 'scroll') scrollPaused = true;
+      // 'select': el id lo fija toggleSelection, aquí solo arranca el reloj
+
+      updateStatusBar();
     }
 
-    function updateScrollButton() {
-      if (!PAUSABLE_SCROLL_ENABLED) return; // No hacer nada si no está habilitado
-      if (!isAutoScrollEnabled && pendingMessagesCount > 0) {
-        scrollToBottomBtn.querySelector('span:last-child').textContent = 
-          pendingMessagesCount === 1 
-            ? '1 mensaje nuevo' 
-            : `${pendingMessagesCount} mensajes nuevos`;
-        scrollToBottomBtn.classList.add('visible');
-      } else {
-        scrollToBottomBtn.classList.remove('visible');
+    /** Quitar la selección actual, si la hay */
+    function clearSelection() {
+      if (selectedMessageId === null) return;
+      const el = messagesContainer.querySelector('.message.selected');
+      if (el) el.classList.remove('selected');
+      selectedMessageId = null;
+    }
+
+    /** Seleccionar un mensaje (pausa fija). Volver a clicarlo lo deselecciona. */
+    function toggleSelection(messageEl) {
+      const id = messageEl.dataset.id;
+
+      if (selectedMessageId === id) {
+        clearSelection();
+        // Al soltar la selección, si nada más nos pausa, reanudar
+        if (!isPaused()) {
+          resumeChat();
+          scrollToBottom(true);
+        } else {
+          updateStatusBar();
+        }
+        return;
+      }
+
+      clearSelection();
+      // pauseChat arranca el cronómetro solo si no estábamos ya pausados,
+      // así que se llama antes de fijar el id
+      pauseChat('select');
+      selectedMessageId = id;
+      messageEl.classList.add('selected');
+      updateStatusBar();
+    }
+
+    function updateStatusBar() {
+      if (!PAUSABLE_ENABLED) return;
+
+      if (!isPaused()) {
+        statusBar.classList.remove('visible', 'has-selection');
+        barPending.classList.remove('visible');
+        barDelete.classList.remove('visible');
+        barResume.classList.remove('visible');
+        separator.classList.remove('visible');
+        return;
+      }
+
+      statusBar.classList.add('visible');
+
+      const hasSelection = selectedMessageId !== null;
+      const hasPending = pendingMessagesCount > 0;
+
+      statusBar.classList.toggle('has-selection', hasSelection);
+
+      // Con un mensaje seleccionado la barra pasa a ser el sitio de las
+      // acciones: es la única forma de soltar esta pausa
+      barDelete.classList.toggle('visible', hasSelection);
+      barResume.classList.toggle('visible', hasSelection);
+
+      // El contador de pendientes solo estorba cuando hay selección
+      barPending.classList.toggle('visible', hasPending && !hasSelection);
+      separator.classList.toggle('visible', hasSelection || hasPending);
+
+      statusBar.querySelector('.pause-label').textContent =
+        hasSelection ? '⏸ Mensaje seleccionado' : '⏸ Chat pausado';
+
+      if (hasPending) {
+        pendingText.textContent = pendingMessagesCount === 1
+          ? '1 mensaje nuevo'
+          : `${pendingMessagesCount} mensajes nuevos`;
       }
     }
 
-    // Solo agregar listeners si el scroll pausable está habilitado
-    if (PAUSABLE_SCROLL_ENABLED) {
+    // Sin pausa la barra nunca aparece: se saca del layout para no
+    // desperdiciar alto en OBS
+    if (!PAUSABLE_ENABLED) {
+      document.getElementById('chat-container').classList.add('no-pause');
+    }
+
+    // Solo agregar listeners si la pausa está habilitada
+    if (PAUSABLE_ENABLED) {
       // Detectar scroll del usuario
       messagesContainer.addEventListener('scroll', () => {
         if (isUserScrolling) return; // Ignorar si estamos en medio de un scroll programático
-        
+
         if (isScrolledToBottom()) {
-          enableAutoScroll();
+          // Solo el scroll deja de pausar; si el cursor sigue encima, seguimos pausados
+          scrollPaused = false;
+          if (!isPaused()) resumeChat();
+          else updateStatusBar();
         } else {
-          disableAutoScroll();
+          pauseChat('scroll');
         }
       });
 
@@ -506,28 +699,81 @@
         scrollTimeout = setTimeout(() => {
           isUserScrolling = false;
           if (!isScrolledToBottom()) {
-            disableAutoScroll();
+            pauseChat('scroll');
           }
         }, 150);
       });
 
-      // Pausar auto-scroll al pasar el mouse sobre el chat
-      messagesContainer.addEventListener('mouseenter', () => {
-        if (isScrolledToBottom()) return; // No pausar si ya está abajo
-        disableAutoScroll();
+      // Pausar al pasar el cursor SOBRE UN MENSAJE.
+      // Se usa 'mouseover' (burbujea) en vez de 'mouseenter' (no burbujea)
+      // para poder delegar y distinguir mensaje de hueco entre mensajes.
+      messagesContainer.addEventListener('mouseover', (event) => {
+        const messageEl = event.target.closest('.message');
+        if (!messageEl) return;
+
+        setHoveredMessage(messageEl);
+        pauseChat('hover');
       });
 
-      // Reanudar auto-scroll al salir el mouse (solo si está al fondo)
-      messagesContainer.addEventListener('mouseleave', () => {
-        if (isScrolledToBottom()) {
-          enableAutoScroll();
-        }
+      // Soltar la pausa por hover al salir del mensaje, sin esperar a salir
+      // de la lista entera.
+      messagesContainer.addEventListener('mouseout', (event) => {
+        if (!event.target.closest('.message')) return;
+
+        // Al ir del mensaje A al B, el 'mouseout' de A dispara ANTES que el
+        // 'mouseover' de B. Sin esta guarda se reanudaría (con salto al fondo)
+        // para volver a pausar al instante: un parpadeo.
+        if (event.relatedTarget?.closest?.('.message')) return;
+
+        releaseHoverPause();
       });
 
-      // Botón para volver al fondo
-      scrollToBottomBtn.addEventListener('click', () => {
+      // Red de seguridad: cubre salir por el borde o relatedTarget nulo
+      messagesContainer.addEventListener('mouseleave', releaseHoverPause);
+
+      // Click en un mensaje: lo selecciona y fija la pausa
+      messagesContainer.addEventListener('click', (event) => {
+        const messageEl = event.target.closest('.message');
+        if (messageEl) toggleSelection(messageEl);
+      });
+
+      // Acciones de la barra
+      barPending.addEventListener('click', () => scrollToBottom(true));
+
+      barResume.addEventListener('click', () => {
+        resumeChat();
         scrollToBottom(true);
       });
+
+      barDelete.addEventListener('click', () => {
+        if (selectedMessageId !== null) deleteMessage(selectedMessageId);
+      });
+    }
+
+    /**
+     * Terminar la pausa por hover. No toca la pausa por scroll ni la
+     * selección: esas se sueltan por su cuenta.
+     */
+    /** Mover el resaltado al mensaje bajo el cursor */
+    function setHoveredMessage(messageEl) {
+      const previous = messagesContainer.querySelector('.message.hovered');
+      if (previous === messageEl) return;
+      if (previous) previous.classList.remove('hovered');
+      if (messageEl) messageEl.classList.add('hovered');
+    }
+
+    function releaseHoverPause() {
+      if (!PAUSABLE_ENABLED) return;
+
+      setHoveredMessage(null);
+      hoverPaused = false;
+
+      if (isPaused()) {
+        updateStatusBar();
+      } else {
+        resumeChat();
+        scrollToBottom(true);
+      }
     }
 
     // ============================================
@@ -575,30 +821,86 @@
                 </div>
             `;
 
+      // Marcar cuándo caduca. Lo consume el barrido periódico, que respeta
+      // la pausa (antes era un setTimeout por mensaje que la ignoraba)
+      if (!PERSIST_MESSAGES) {
+        messageEl.dataset.expiresAt = String(Date.now() + MESSAGE_LIFETIME_MS);
+      }
+
       messagesContainer.appendChild(messageEl);
 
-      // Auto-scroll: siempre activo si PAUSABLE_SCROLL_ENABLED está deshabilitado
-      if (!PAUSABLE_SCROLL_ENABLED || isAutoScrollEnabled) {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      } else {
-        // Incrementar contador de mensajes pendientes (solo si pausable está habilitado)
+      if (isPaused()) {
+        // Pausado: el mensaje entra pero la vista no se mueve
         pendingMessagesCount++;
-        updateScrollButton();
+        updateStatusBar();
+      } else {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
       }
 
-      // Eliminar mensajes antiguos si hay demasiados
-      while (messagesContainer.children.length > MAX_MESSAGES) {
+      trimMessages();
+    }
+
+    /**
+     * Recortar mensajes antiguos.
+     * Mientras el chat está pausado no se recorta nada hasta el tope de
+     * seguridad, para no borrar lo que el usuario está leyendo. Si se llega
+     * al tope, se compensa el scroll para que la vista no dé un salto.
+     */
+    function trimMessages() {
+      const paused = isPaused();
+      const limit = paused ? MAX_MESSAGES_PAUSED : MAX_MESSAGES;
+
+      if (messagesContainer.children.length <= limit) return;
+
+      const heightBefore = messagesContainer.scrollHeight;
+
+      while (messagesContainer.children.length > limit) {
         const oldMessage = messagesContainer.firstElementChild;
-        if (oldMessage) oldMessage.remove(); // Eliminación directa sin animación
+        if (!oldMessage) break;
+
+        // Si el recorte se lleva el mensaje seleccionado, soltar la selección:
+        // si no, la pausa quedaría fijada sin nada que mostrar en la barra
+        if (oldMessage.dataset.id === selectedMessageId) {
+          selectedMessageId = null;
+        }
+
+        oldMessage.remove(); // Eliminación directa sin animación
       }
 
-      // Auto-eliminar después de cierto tiempo (solo si PERSIST_MESSAGES = false)
-      if (!PERSIST_MESSAGES) {
-        const msgId = msg.id;
-        setTimeout(() => {
-          const el = document.querySelector(`[data-id="${msgId}"]`);
-          if (el) removeMessage(el);
-        }, MESSAGE_LIFETIME_MS);
+      if (paused) {
+        messagesContainer.scrollTop -= (heightBefore - messagesContainer.scrollHeight);
+      }
+    }
+
+    /**
+     * Desplazar la caducidad de todos los mensajes por el tiempo que el
+     * chat estuvo pausado, para que la pausa congele el reloj de verdad
+     * en vez de hacer que todo caduque de golpe al reanudar.
+     * @param {number} deltaMs
+     */
+    function shiftExpiries(deltaMs) {
+      if (PERSIST_MESSAGES || deltaMs <= 0) return;
+
+      for (const el of messagesContainer.children) {
+        const expiresAt = Number(el.dataset.expiresAt);
+        if (expiresAt) el.dataset.expiresAt = String(expiresAt + deltaMs);
+      }
+    }
+
+    /**
+     * Barrido único de mensajes caducados, en lugar de un temporizador por
+     * mensaje. No borra nada mientras el chat está pausado.
+     */
+    function sweepExpiredMessages() {
+      if (PERSIST_MESSAGES || isPaused()) return;
+
+      const now = Date.now();
+      // Se copia porque children es una colección viva y vamos a borrar de ella
+      for (const el of [...messagesContainer.children]) {
+        const expiresAt = Number(el.dataset.expiresAt);
+        if (expiresAt && now >= expiresAt && !el.classList.contains('removing')) {
+          removeMessage(el);
+        }
       }
     }
 
@@ -621,6 +923,46 @@
       }, 300);
     }
 
+    /**
+     * Quitar un mensaje del DOM por id. Lo dispara el aviso de borrado del
+     * servidor, así que corre en TODOS los clientes (navegador y OBS).
+     * @param {string} id
+     */
+    function removeMessageById(id) {
+      const el = messagesContainer.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      if (!el) return;
+
+      // Si era el seleccionado, se suelta la pausa que mantenía
+      if (selectedMessageId === id) {
+        selectedMessageId = null;
+        if (!isPaused()) resumeChat();
+        else updateStatusBar();
+      }
+
+      removeMessage(el);
+    }
+
+    /**
+     * Pedir al servidor que borre un mensaje. El servidor lo saca del
+     * historial y avisa a todos los clientes; el borrado local llega por ahí.
+     * @param {string} id
+     */
+    async function deleteMessage(id) {
+      try {
+        const res = await fetch(`/api/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+        if (!res.ok) {
+          console.error(`No se pudo borrar el mensaje ${id}:`, res.status);
+          // El mensaje puede haber salido ya del historial del servidor
+          // (supera MAX_HISTORY); se quita en local para no dejarlo colgado
+          removeMessageById(id);
+        }
+      } catch (e) {
+        console.error('Error al borrar el mensaje:', e);
+        removeMessageById(id);
+      }
+    }
+
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
@@ -630,6 +972,10 @@
     // ============================================
     // INICIAR
     // ============================================
+    if (!PERSIST_MESSAGES) {
+      setInterval(sweepExpiredMessages, EXPIRY_SWEEP_INTERVAL_MS);
+    }
+
     connect();
   </script>
 </body>

@@ -16,7 +16,8 @@ Bridge en Node.js que unifica el chat de **Twitch**, **Kick** y **YouTube Live**
 - Mock de Kick opcional para desarrollo
 - Mensajes unificados en formato común
 - WebSocket para comunicación en tiempo real
-- Overlay HTML listo para OBS con scroll pausable
+- Overlay HTML listo para OBS, con pausa al pasar el cursor sobre un mensaje
+- Borrado de mensajes propagado a todos los clientes (también al overlay de OBS)
 - Renderizado de emotes de Twitch, Kick y YouTube
 - Badges oficiales con imágenes para las 3 plataformas (incluyendo badges personalizadas de YouTube)
 - Auto-reconexión en caso de desconexión
@@ -273,12 +274,68 @@ git status
 | `YOUTUBE_CHANNEL` | Canal del que autodetectar el directo (`@handle` o `UCxxxx`) | - |
 | `YOUTUBE_VIDEO_ID` | Override manual del video. Vacío = autodetectar por canal | - |
 
+### Parámetros de URL del overlay
+
+El comportamiento se ajusta desde la propia URL, sin tocar código:
+
+| Parámetro | Default | Descripción |
+|-----------|---------|-------------|
+| `pausable` | `true` | Pausa del chat al pasar el cursor sobre un mensaje o scrollear hacia arriba. `?pausable=false` la desactiva |
+| `persist` | `false` | Mantiene el historial completo (100 mensajes, sin caducidad) en vez del modo transitorio (15 mensajes, 60 s) |
+
+```
+http://localhost:3000/overlay.html                      # por defecto
+http://localhost:3000/overlay.html?persist=true         # historial completo
+http://localhost:3000/overlay.html?pausable=false       # sin pausa (recomendado en OBS)
+```
+
+### Pausar el chat
+
+| Acción | Efecto |
+|--------|--------|
+| **Cursor sobre un mensaje** | Lo resalta con borde blanco y pausa. Al retirar el cursor, **reanuda solo** |
+| **Click en un mensaje** | Lo selecciona: pausa fija que no se suelta al mover el cursor |
+| **Scroll hacia arriba** | Pausa. Volver al final reanuda |
+
+Mientras está pausado:
+
+- No se borra ningún mensaje, ni por límite de cantidad ni por caducidad.
+- El reloj de caducidad se detiene: al reanudar, los mensajes recuperan el tiempo que estuvieron congelados.
+- Una barra **debajo** de la lista (nunca encima) muestra el estado y las acciones disponibles.
+
+La barra reserva su hueco siempre, para que al pausar la lista no se desplace bajo el cursor.
+
+> En OBS no hay cursor ni scroll, así que la pausa no se dispara aunque esté activada. Con `?pausable=false` la barra ni siquiera ocupa espacio.
+
+### Borrar mensajes
+
+Para quitar un mensaje de la pantalla: **click en el mensaje** → botón **🗑 Borrar** de la barra inferior.
+
+El borrado va al servidor, que lo saca del historial y avisa a todos los clientes conectados. Es decir:
+
+- Desaparece a la vez en el navegador **y en el overlay de OBS**.
+- No vuelve a aparecer al refrescar.
+
+> ⚠️ El borrado es inmediato y **no se puede deshacer**.
+
+También se puede borrar por API:
+
+```bash
+curl -X DELETE http://localhost:3000/api/messages/<id-del-mensaje>
+```
+
+| Endpoint | Respuesta |
+|----------|-----------|
+| `DELETE /api/messages/:id` | `200` con `{ok:true, id}`, o `404` si el mensaje ya no está en el historial |
+
 ### Personalizar el Overlay
 
 Edita `public/overlay.html` para ajustar:
 
-- `MAX_MESSAGES`: Número máximo de mensajes visibles (default: 15)
-- `MESSAGE_LIFETIME`: Tiempo antes de auto-eliminar mensajes (default: 60000ms)
+- `MAX_MESSAGES_TRANSIENT` / `MAX_MESSAGES_PERSIST`: mensajes visibles según el modo (15 / 100)
+- `MAX_MESSAGES_PAUSED`: tope de acumulación mientras el chat está pausado (default: 300)
+- `MESSAGE_LIFETIME_MS`: tiempo antes de auto-eliminar mensajes (default: 60000 ms)
+- `--msg-bg-alpha` y `--msg-border-alpha` en `:root`: opacidad del fondo del mensaje y del borde de plataforma (default: `0.85`)
 - Colores y estilos CSS
 
 ## API WebSocket
