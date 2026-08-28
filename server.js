@@ -17,14 +17,22 @@ const KICK_USE_MOCK = process.env.KICK_USE_MOCK === 'true';
 
 // YouTube (InnerTube - sin API key ni OAuth)
 const YOUTUBE_ENABLED = process.env.YOUTUBE_ENABLED === 'true';
-// Canal del que autodetectar el directo ('@handle' o 'UCxxxx')
-const YOUTUBE_CHANNEL = process.env.YOUTUBE_CHANNEL || '';
+// Canales de los que autodetectar el directo ('@handle' o 'UCxxxx'),
+// separados por comas. Se conecta al primero de la lista que esté emitiendo.
+// YOUTUBE_CHANNEL (singular) se sigue aceptando por compatibilidad.
+const YOUTUBE_CHANNELS = (process.env.YOUTUBE_CHANNELS || process.env.YOUTUBE_CHANNEL || '')
+    .split(',')
+    .map(c => c.trim())
+    .filter(Boolean);
 // Override manual opcional: si está puesto, se salta la autodetección
 const YOUTUBE_VIDEO_ID_OVERRIDE = process.env.YOUTUBE_VIDEO_ID || '';
 
 // Estado mutable de la conexión de YouTube
 let currentYouTubeVideoId = null;
+let currentYouTubeChannel = null;
 let youtubePollTimer = null;
+// Cola para serializar las conexiones (ver connectYouTube)
+let youtubeConnectQueue = Promise.resolve();
 
 // Intervalo de sondeo del directo (ms)
 const YOUTUBE_POLL_INTERVAL = 90000; // 90 segundos
@@ -244,7 +252,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/youtube/status', (req, res) => {
     res.json({
         enabled: YOUTUBE_ENABLED,
-        channel: YOUTUBE_CHANNEL || null,
+        channels: YOUTUBE_CHANNELS,          // los configurados
+        channel: currentYouTubeChannel,      // al que se está conectado ahora
         videoId: currentYouTubeVideoId,
         searching: youtubePollTimer !== null,
         ...(youtubeClient ? youtubeClient.getStats() : { connected: false })
@@ -259,20 +268,23 @@ app.post('/api/youtube/video', async (req, res) => {
 
     const input = req.body?.videoId || req.body?.url;
 
-    // Sin body: re-escanear el canal
+    // Sin body: re-escanear todos los canales configurados
     if (!input) {
-        if (!YOUTUBE_CHANNEL) {
-            return res.status(400).json({ error: 'No hay YOUTUBE_CHANNEL configurado para re-escanear' });
+        if (YOUTUBE_CHANNELS.length === 0) {
+            return res.status(400).json({ error: 'No hay YOUTUBE_CHANNELS configurados para re-escanear' });
         }
 
-        const found = await resolveLiveVideoId(YOUTUBE_CHANNEL);
+        const found = await findLiveChannel(YOUTUBE_CHANNELS);
         if (!found) {
-            return res.status(404).json({ error: `El canal ${YOUTUBE_CHANNEL} no está en directo`, channel: YOUTUBE_CHANNEL });
+            return res.status(404).json({
+                error: `Ningún canal está en directo: ${YOUTUBE_CHANNELS.join(', ')}`,
+                channels: YOUTUBE_CHANNELS
+            });
         }
 
         try {
-            await connectYouTube(found);
-            return res.json({ ok: true, videoId: found, source: 'autodetect' });
+            await connectYouTube(found.videoId, found.channel);
+            return res.json({ ok: true, videoId: found.videoId, channel: found.channel, source: 'autodetect' });
         } catch (error) {
             return res.status(500).json({ error: error.message });
         }
@@ -285,10 +297,41 @@ app.post('/api/youtube/video', async (req, res) => {
     }
 
     try {
-        await connectYouTube(videoId);
+        // Sin canal: el video viene suelto, no se sabe de cuál sale
+        await connectYouTube(videoId, null);
         // El sondeo ya no tiene sentido si nos han dado un ID a mano
         stopYouTubePolling();
         res.json({ ok: true, videoId, source: 'manual' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Cambiar al directo de un canal concreto, sin tocar el .env.
+// Acepta cualquier canal, no solo los de YOUTUBE_CHANNELS.
+app.post('/api/youtube/channel', async (req, res) => {
+    if (!youtubeClient) {
+        return res.status(409).json({ error: 'YouTube está deshabilitado (YOUTUBE_ENABLED=false)' });
+    }
+
+    const channel = req.body?.channel?.trim();
+    if (!channel) {
+        return res.status(400).json({
+            error: 'Falta el campo "channel" (@handle o UCxxxx)',
+            channels: YOUTUBE_CHANNELS
+        });
+    }
+
+    const videoId = await resolveLiveVideoId(channel);
+    if (!videoId) {
+        return res.status(404).json({ error: `El canal ${channel} no está en directo`, channel });
+    }
+
+    try {
+        await connectYouTube(videoId, channel);
+        // Se ha elegido canal a mano: no seguir buscando por la lista
+        stopYouTubePolling();
+        res.json({ ok: true, channel, videoId, source: 'channel' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -683,7 +726,8 @@ if (YOUTUBE_ENABLED) {
     });
     
     youtubeClient.on('connected', () => {
-        console.log(`🔴 YouTube InnerTube conectado correctamente (video: ${currentYouTubeVideoId})`);
+        const origen = currentYouTubeChannel ? `${currentYouTubeChannel}, ` : '';
+        console.log(`🔴 YouTube InnerTube conectado correctamente (${origen}video: ${currentYouTubeVideoId})`);
         // Ya hay directo enganchado: dejar de buscar
         stopYouTubePolling();
     });
@@ -695,7 +739,8 @@ if (YOUTUBE_ENABLED) {
     youtubeClient.on('disconnected', () => {
         console.log('🔴 YouTube InnerTube desconectado (directo finalizado)');
         currentYouTubeVideoId = null;
-        console.log('🔴 Para enganchar otro directo: POST /api/youtube/video');
+        currentYouTubeChannel = null;
+        console.log('🔴 Para enganchar otro directo: POST /api/youtube/video (o /channel)');
     });
 } else {
     console.log('🔴 YouTube deshabilitado');
@@ -705,8 +750,23 @@ if (YOUTUBE_ENABLED) {
  * Conectar el adapter de YouTube a un video concreto
  * Desconecta antes si ya había una sesión activa
  * @param {string} videoId
+ * @param {string|null} channel - canal del que salió el video, si se sabe
  */
-async function connectYouTube(videoId) {
+async function connectYouTube(videoId, channel = null) {
+    // Se serializan las llamadas: el sondeo y un cambio manual pueden coincidir,
+    // y con dos connect() solapados el isConnected del adapter aún es false
+    // cuando entra el segundo, así que no se corta la sesión anterior y quedan
+    // dos vivas con el estado mintiendo sobre cuál está activa.
+    const run = youtubeConnectQueue.then(
+        () => doConnectYouTube(videoId, channel),
+        () => doConnectYouTube(videoId, channel)
+    );
+    // El catch evita que un fallo envenene la cola para las siguientes
+    youtubeConnectQueue = run.catch(() => {});
+    return run;
+}
+
+async function doConnectYouTube(videoId, channel) {
     if (!youtubeClient) {
         throw new Error('YouTube está deshabilitado');
     }
@@ -718,11 +778,13 @@ async function connectYouTube(videoId) {
     // Se asigna ANTES de conectar porque el evento 'connected' puede dispararse
     // durante connect(); si falla, se revierte para que el estado no mienta
     currentYouTubeVideoId = videoId;
+    currentYouTubeChannel = channel;
 
     try {
         await youtubeClient.connect(videoId);
     } catch (error) {
         currentYouTubeVideoId = null;
+        currentYouTubeChannel = null;
         throw error;
     }
 }
@@ -738,21 +800,36 @@ function stopYouTubePolling() {
 }
 
 /**
- * Sondear el canal hasta encontrar un directo activo
+ * Buscar el primer canal de la lista que esté emitiendo.
+ * Va en orden y para en cuanto encuentra uno, así que el orden de
+ * YOUTUBE_CHANNELS marca la prioridad si hubiera dos en directo.
+ * @param {string[]} channels
+ * @returns {Promise<{channel: string, videoId: string}|null>}
+ */
+async function findLiveChannel(channels) {
+    for (const channel of channels) {
+        const videoId = await resolveLiveVideoId(channel);
+        if (videoId) return { channel, videoId };
+    }
+    return null;
+}
+
+/**
+ * Sondear los canales hasta encontrar un directo activo
  * Se detiene solo al conectar (ver el handler de 'connected')
  */
 function startYouTubePolling() {
-    if (youtubePollTimer || !YOUTUBE_CHANNEL) return;
+    if (youtubePollTimer || YOUTUBE_CHANNELS.length === 0) return;
 
-    console.log(`🔴 Buscando directo en ${YOUTUBE_CHANNEL} cada ${YOUTUBE_POLL_INTERVAL / 1000}s...`);
+    console.log(`🔴 Buscando directo en ${YOUTUBE_CHANNELS.join(', ')} cada ${YOUTUBE_POLL_INTERVAL / 1000}s...`);
 
     youtubePollTimer = setInterval(async () => {
-        const videoId = await resolveLiveVideoId(YOUTUBE_CHANNEL);
+        const found = await findLiveChannel(YOUTUBE_CHANNELS);
 
-        if (videoId) {
-            console.log(`🔴 ¡Directo detectado! Video: ${videoId}`);
+        if (found) {
+            console.log(`🔴 ¡Directo detectado en ${found.channel}! Video: ${found.videoId}`);
             try {
-                await connectYouTube(videoId);
+                await connectYouTube(found.videoId, found.channel);
             } catch (error) {
                 console.error('🔴 Error al conectar YouTube InnerTube:', error.message);
             }
@@ -778,25 +855,25 @@ async function startYouTube() {
     }
 
     // 2. Autodetección por canal
-    if (!YOUTUBE_CHANNEL) {
-        console.log('🔴 YouTube habilitado pero falta YOUTUBE_CHANNEL (o YOUTUBE_VIDEO_ID)');
+    if (YOUTUBE_CHANNELS.length === 0) {
+        console.log('🔴 YouTube habilitado pero falta YOUTUBE_CHANNELS (o YOUTUBE_VIDEO_ID)');
         return;
     }
 
-    console.log(`🔴 Autodetectando directo del canal ${YOUTUBE_CHANNEL}...`);
-    const videoId = await resolveLiveVideoId(YOUTUBE_CHANNEL);
+    console.log(`🔴 Autodetectando directo en ${YOUTUBE_CHANNELS.join(', ')}...`);
+    const found = await findLiveChannel(YOUTUBE_CHANNELS);
 
-    if (videoId) {
-        console.log(`🔴 Directo encontrado: ${videoId}`);
+    if (found) {
+        console.log(`🔴 Directo encontrado en ${found.channel}: ${found.videoId}`);
         try {
-            await connectYouTube(videoId);
+            await connectYouTube(found.videoId, found.channel);
         } catch (error) {
             console.error('🔴 Error al conectar YouTube InnerTube:', error.message);
         }
         return;
     }
 
-    console.log('🔴 El canal no está en directo ahora mismo');
+    console.log('🔴 Ningún canal está en directo ahora mismo');
     startYouTubePolling();
 }
 
@@ -922,7 +999,7 @@ server.listen(PORT, async () => {
     console.log('📺 Plataformas:');
     console.log(`   💜 Twitch: #${TWITCH_CHANNEL}`);
     console.log(`   💚 Kick: ${KICK_ENABLED ? '#' + KICK_CHANNEL : 'Deshabilitado'}`);
-    console.log(`   🔴 YouTube: ${YOUTUBE_ENABLED ? (YOUTUBE_CHANNEL || YOUTUBE_VIDEO_ID_OVERRIDE || 'Sin canal') : 'Deshabilitado'}`);
+    console.log(`   🔴 YouTube: ${YOUTUBE_ENABLED ? (YOUTUBE_CHANNELS.join(', ') || YOUTUBE_VIDEO_ID_OVERRIDE || 'Sin canal') : 'Deshabilitado'}`);
     console.log('═══════════════════════════════════════════');
 
     // Obtener token de Twitch y cargar badges globales

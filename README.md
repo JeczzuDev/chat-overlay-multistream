@@ -81,20 +81,22 @@ Para mostrar las badges oficiales de Twitch (broadcaster, mod, sub, etc.), neces
 
 Para mostrar mensajes de YouTube Live, el proyecto usa `youtube.js` (InnerTube API) que **NO requiere API Key** ni tiene límites de cuota.
 
-Basta con indicar tu canal: el servidor **detecta solo el ID del directo** cuando sales al aire.
+Basta con indicar tus canales: el servidor **detecta solo el ID del directo** cuando sales al aire. Puedes poner **varios separados por comas** y alternar entre ellos sin volver a tocar este archivo.
 
 ```env
 YOUTUBE_ENABLED=true
-YOUTUBE_CHANNEL=@tu_canal
+YOUTUBE_CHANNELS=@tu_canal,@tu_segundo_canal
 YOUTUBE_VIDEO_ID=
 ```
 
 **Cómo funciona la autodetección:**
 
-1. Al arrancar, el servidor resuelve `youtube.com/@tu_canal/live`.
-2. Si estás en directo, engancha el chat al instante.
-3. Si no, sondea cada 90 s hasta que el directo empiece, y entonces conecta solo.
+1. Al arrancar, el servidor resuelve `youtube.com/@tu_canal/live` para **cada canal de la lista, en orden**.
+2. Se conecta al primero que esté emitiendo. Si estás en directo, engancha el chat al instante.
+3. Si ninguno lo está, sondea todos cada 90 s hasta que empiece uno, y entonces conecta solo.
 4. Una vez conectado, deja de sondear.
+
+> Con varios canales solo se mantiene **una** conexión a la vez: la del que esté en directo. El orden de `YOUTUBE_CHANNELS` decide cuál gana si coincidieran dos emitiendo.
 
 > ⚠️ **El directo debe ser PÚBLICO.** Los directos no listados o privados son invisibles para InnerTube anónimo; esos sí requerirían OAuth. Si programas el directo en Studio, basta con que sea público al salir al aire.
 
@@ -113,12 +115,20 @@ curl -X POST http://localhost:3000/api/youtube/video \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
 
-# Re-escanear el canal (body vacío) — útil para enganchar un segundo directo
-curl -X POST http://localhost:3000/api/youtube/video \
-  -H "Content-Type: application/json" -d '{}'
+# Re-escanear TODOS los canales (body vacío) — engancha el que esté en directo
+curl -X POST http://localhost:3000/api/youtube/video -H "Content-Type: application/json" -d '{}'
+
+# Cambiar a un canal concreto (acepta cualquiera, no solo los del .env)
+curl -X POST http://localhost:3000/api/youtube/channel -H "Content-Type: application/json" -d '{"channel":"@tu_segundo_canal"}'
 ```
 
-> **Nota:** al terminar un directo, el servidor no vuelve a sondear solo. Para enganchar el siguiente, usa el re-escaneo de arriba o reinicia.
+| Endpoint | Qué hace |
+|----------|----------|
+| `GET /api/youtube/status` | Estado: `channels` (configurados), `channel` (activo), `videoId`, `searching` |
+| `POST /api/youtube/video` | Con `{videoId}` o `{url}` fuerza ese video; con `{}` re-escanea la lista |
+| `POST /api/youtube/channel` | Con `{channel}` cambia al directo de ese canal. `404` si no está emitiendo |
+
+> **Nota:** al terminar un directo, el servidor no vuelve a sondear solo. Para enganchar el siguiente, usa el re-escaneo o el cambio de canal de arriba.
 
 ### 6. Iniciar el servidor
 
@@ -279,7 +289,8 @@ git status
 | `KICK_ENABLED` | Activar/desactivar Kick | `true` |
 | `KICK_USE_MOCK` | Usar mock en vez de Puppeteer | `false` |
 | `YOUTUBE_ENABLED` | Activar/desactivar YouTube | `false` |
-| `YOUTUBE_CHANNEL` | Canal del que autodetectar el directo (`@handle` o `UCxxxx`) | - |
+| `YOUTUBE_CHANNELS` | Canales de los que autodetectar el directo (`@handle` o `UCxxxx`), separados por comas. El orden marca la prioridad | - |
+| `YOUTUBE_CHANNEL` | Alias de un solo canal, aceptado por compatibilidad | - |
 | `YOUTUBE_VIDEO_ID` | Override manual del video. Vacío = autodetectar por canal | - |
 
 ### Parámetros de URL del overlay
@@ -382,7 +393,7 @@ El proyecto usa la librería `youtube.js` que accede a la **InnerTube API** (API
 **Configuración:**
 ```env
 YOUTUBE_ENABLED=true
-YOUTUBE_CHANNEL=@tu_canal
+YOUTUBE_CHANNELS=@tu_canal,@tu_segundo_canal
 YOUTUBE_VIDEO_ID=
 ```
 
